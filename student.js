@@ -49,6 +49,8 @@ const els = {
 	studySessionTitle: document.querySelector("#studySessionTitle"),
 	studySessionMeta: document.querySelector("#studySessionMeta"),
 	studySessionAmount: document.querySelector("#studySessionAmount"),
+	studySessionTeacherNoteRow: document.querySelector("#studySessionTeacherNoteRow"),
+	studySessionTeacherNote: document.querySelector("#studySessionTeacherNote"),
 	studySessionStartTime: document.querySelector("#studySessionStartTime"),
 	studySessionElapsed: document.querySelector("#studySessionElapsed"),
 	studySessionFeedback: document.querySelector("#studySessionFeedback"),
@@ -362,24 +364,31 @@ function render() {
 	els.rewardPageTotal.textContent = formatRewardTotal(rewardTotals);
 	els.rewardHistoryCount.textContent = String(rewardHistoryCount);
 	els.weekRange.textContent = `${formatDate(weekStart)} ~ ${formatDate(addDays(weekStart, 6))}`;
-	els.todayPlanList.innerHTML = renderPlanList(todayPlans, "오늘 학습 계획이 없습니다.");
+	els.todayPlanList.innerHTML = renderPlanList(todayPlans, "오늘 학습 계획이 없습니다.", true);
 	els.weekPlanList.innerHTML = renderPlanList(visibleWeekPlans, "선택한 조건의 학습 계획이 없습니다.");
 	els.rewardHistory.innerHTML = renderRewardHistory();
 }
 
-function renderPlanList(plans, emptyText) {
+function renderPlanList(plans, emptyText, showTeacherMemo = false) {
 	if (!plans.length) return `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
 
 	return plans
 		.map((plan) => {
 			const entry = plan.entry || {};
 			const amountText = entry.amount || "학습량 미입력";
+			const teacherMemo = String(entry.memo || "").trim();
 			const recordItems = [
 				entry.studyStartedAt ? `시작 ${formatDateTime(entry.studyStartedAt)}` : "",
 				entry.studyDurationSeconds ? `누적 ${formatDurationSeconds(entry.studyDurationSeconds)}` : "",
 				entry.studentFeedback ? `피드백 ${entry.studentFeedback}` : "",
-				!entry.studyStartedAt && !entry.studyDurationSeconds && entry.memo ? entry.memo : "",
 			].filter(Boolean);
+			const teacherMemoRow =
+				showTeacherMemo && teacherMemo
+					? `<div class="student-plan-info-row">
+            <span>선생님 메모</span>
+            <p>${escapeHtml(teacherMemo)}</p>
+          </div>`
+					: "";
 			const completedDetail = entry.completed
 				? `<div class="student-plan-record">
             <span>완료 기록</span>
@@ -399,9 +408,12 @@ function renderPlanList(plans, emptyText) {
             ${entry.rewardAwarded && !entry.rewardRedeemed ? `<span class="reward-badge">+${escapeHtml(formatReward(entry.rewardAmount, entry.rewardLabel))}</span>` : ""}
           </div>
         </div>
-        <div class="student-plan-amount">
-          <span>학습량</span>
-          <strong>${escapeHtml(amountText)}</strong>
+        <div class="student-plan-info">
+          <div class="student-plan-info-row">
+            <span>학습량</span>
+            <p>${escapeHtml(amountText)}</p>
+          </div>
+          ${teacherMemoRow}
         </div>
         ${completedDetail}
         <div class="student-plan-actions">
@@ -465,17 +477,22 @@ async function saveStudyEntry(payload) {
 function startStudy(card) {
 	const subject = state.subjects.find((item) => item.id === card.dataset.subjectId);
 	if (!subject) return;
+	const entry = state.entries[entryKey(card.dataset.subjectId, card.dataset.date)] || {};
+	const teacherMemo = String(entry.memo || "").trim();
 
 	activeStudy = {
 		subjectId: card.dataset.subjectId,
 		date: card.dataset.date,
 		subject,
 		amount: card.dataset.amount || "학습량 미입력",
+		memo: teacherMemo,
 		startedAt: new Date(),
 	};
 	els.studySessionTitle.textContent = `${subject.name} · ${subject.book}`;
 	els.studySessionMeta.textContent = `${activeStudy.date} ${dayNames[parseDate(activeStudy.date).getDay()]} · ${normalizeScheduleTime(subject.scheduleTime) || "시간 미설정"}`;
-	els.studySessionAmount.textContent = `학습량 ${activeStudy.amount}`;
+	els.studySessionAmount.textContent = activeStudy.amount;
+	els.studySessionTeacherNote.textContent = teacherMemo;
+	els.studySessionTeacherNoteRow.hidden = !teacherMemo;
 	els.studySessionStartTime.textContent = formatClockTime(activeStudy.startedAt);
 	els.studySessionFeedback.value = "";
 	els.studySessionScreen.hidden = false;
@@ -515,7 +532,7 @@ async function completeStudy() {
 			subjectId: activeStudy.subjectId,
 			date: activeStudy.date,
 			amount: activeStudy.amount === "학습량 미입력" ? "" : activeStudy.amount,
-			memo: "",
+			memo: activeStudy.memo,
 			completed: true,
 			studyStartedAt: activeStudy.startedAt.toISOString(),
 			studyDurationSeconds: Math.max(1, Math.round(elapsed / 1000)),

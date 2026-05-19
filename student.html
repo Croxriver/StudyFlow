@@ -157,7 +157,16 @@
           <p class="eyebrow">Study in progress</p>
           <h2 id="studySessionTitle">학습 중</h2>
           <p id="studySessionMeta"></p>
-          <p class="study-session-amount" id="studySessionAmount">학습량 미입력</p>
+          <div class="study-session-info" aria-label="학습 정보">
+            <div class="study-session-info-row">
+              <span>학습량</span>
+              <p id="studySessionAmount">학습량 미입력</p>
+            </div>
+            <div class="study-session-info-row" id="studySessionTeacherNoteRow" hidden>
+              <span>선생님 메모</span>
+              <p id="studySessionTeacherNote"></p>
+            </div>
+          </div>
         </div>
         <div class="study-session-stats" aria-label="학습 시간">
           <article>

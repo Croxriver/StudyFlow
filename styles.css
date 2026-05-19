@@ -2671,16 +2671,25 @@ td:has(.entry-cell) {
 	resize: vertical;
 }
 
-.student-plan-amount {
-	background: var(--field);
+.student-plan-info {
+	background: color-mix(in srgb, var(--field) 78%, var(--panel));
 	border: 1px solid var(--line);
-	border-radius: 8px;
+	border-radius: 10px;
 	display: grid;
-	gap: 4px;
+	overflow: hidden;
+}
+
+.student-plan-info-row {
+	display: grid;
+	gap: 5px;
 	padding: 10px 12px;
 }
 
-.student-plan-amount span {
+.student-plan-info-row + .student-plan-info-row {
+	border-top: 1px solid var(--line);
+}
+
+.student-plan-info-row span {
 	color: var(--muted);
 	font-size: 12px;
 	font-weight: 700;
@@ -2688,10 +2697,13 @@ td:has(.entry-cell) {
 	text-transform: uppercase;
 }
 
-.student-plan-amount strong {
+.student-plan-info-row p {
 	color: var(--ink);
 	font-size: 14px;
 	font-weight: 700;
+	line-height: 1.5;
+	margin: 0;
+	white-space: pre-wrap;
 }
 
 .student-plan-record {
@@ -2789,27 +2801,61 @@ td:has(.entry-cell) {
 	width: 94px;
 }
 
+.study-session-copy {
+	width: 100%;
+}
+
 .study-session-copy h2 {
 	font-size: 24px;
 	margin-bottom: 8px;
 }
 
-.study-session-copy > p:not(.eyebrow):not(.study-session-amount) {
+.study-session-copy > p:not(.eyebrow) {
 	color: var(--muted);
 	font-size: 14px;
 	margin: 0;
 }
 
-.study-session-amount {
-	background: var(--field);
+.study-session-info {
+	background: color-mix(in srgb, var(--field) 78%, var(--panel));
 	border: 1px solid var(--line);
-	border-radius: 999px;
-	color: var(--ink);
-	display: inline-flex;
-	font-size: 13px;
-	font-weight: 700;
+	border-radius: 10px;
+	display: grid;
 	margin: 12px 0 0;
-	padding: 7px 12px;
+	overflow: hidden;
+	text-align: left;
+	width: 100%;
+}
+
+.study-session-info-row {
+	display: grid;
+	gap: 5px;
+	padding: 12px 14px;
+}
+
+.study-session-info-row + .study-session-info-row {
+	border-top: 1px solid var(--line);
+}
+
+.study-session-info-row span {
+	color: var(--muted);
+	font-size: 12px;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+}
+
+.study-session-info-row p {
+	color: var(--ink);
+	font-size: 14px;
+	font-weight: 700;
+	line-height: 1.5;
+	margin: 0;
+	white-space: pre-wrap;
+}
+
+.study-session-info-row[hidden] {
+	display: none;
 }
 
 .study-session-stats {
