@@ -1,0 +1,9 @@
+{
+  "appId": "kr.csid.studyflow",
+  "appName": "StudyFlow",
+  "webDir": "dist-iis/web",
+  "server": {
+    "url": "https://csid.kr/studyflow/",
+    "cleartext": false
+  }
+}

@@ -1,0 +1,487 @@
+﻿<!doctype html>
+<html lang="ko">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="theme-color" content="#2f9d62" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+		<meta name="apple-mobile-web-app-title" content="스터디플로우" />
+		<title>StudyFlow</title>
+		<script src="./theme.js"></script>
+		<script defer src="./pwa-register.js"></script>
+		<link rel="manifest" href="./manifest.webmanifest" />
+		<link rel="icon" href="./assets/studyflow-icon.svg" type="image/svg+xml" />
+		<link rel="apple-touch-icon" href="./assets/apple-touch-icon.png" />
+		<link rel="stylesheet" href="./styles.css" />
+	</head>
+	<body>
+		<div class="app">
+			<header class="topbar">
+				<div class="topbar-main">
+					<div class="brand-lockup">
+						<img class="brand-text-logo" src="./assets/logo_text.svg" alt="StudyFlow 스터디플로우" />
+					</div>
+				</div>
+				<div class="topbar-theme-slot" id="topbarThemeSlot" hidden>
+					<label class="theme-switch icon-theme-switch" title="라이트/다크 모드 전환" aria-label="라이트/다크 모드 전환">
+						<input type="checkbox" data-theme-toggle aria-label="다크 모드" />
+						<span class="theme-switch-track" aria-hidden="true">
+							<svg class="theme-switch-icon theme-switch-sun" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+								<circle cx="12" cy="12" r="4"></circle>
+								<path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19"></path>
+							</svg>
+							<svg class="theme-switch-icon theme-switch-moon" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+								<path d="M20 15.2A7.6 7.6 0 0 1 8.8 4a8 8 0 1 0 11.2 11.2Z"></path>
+							</svg>
+						</span>
+					</label>
+				</div>
+			</header>
+
+			<main>
+				<section class="page-view active" id="weeklyPage" data-page="weekly">
+					<div class="section-heading">
+						<div>
+							<h2>주간 학습</h2>
+							<p>학생별 이번 주 학습 현황과 기록을 입력하세요.</p>
+						</div>
+					</div>
+					<div class="page-tools">
+						<div class="week-nav-box">
+							<button class="week-nav-btn" id="prevWeek" type="button" aria-label="이전 주">‹</button>
+							<strong id="weekRange"></strong>
+							<button class="week-nav-btn" id="nextWeek" type="button" aria-label="다음 주">›</button>
+						</div>
+						<button class="ghost" id="todayBtn" type="button">이번 주</button>
+						<div class="week-filter-row">
+							<select class="week-child-filter" id="weekChildFilter" aria-label="학생 필터"></select>
+							<select class="week-subject-filter" id="weekSubjectFilter" aria-label="과목 필터"></select>
+							<input class="week-search-input" id="weekSearch" type="search" placeholder="학생, 과목, 교재 검색" aria-label="주간 학습 검색" />
+							<button class="ghost week-child-add" id="weekChildAdd" type="button">학생 등록</button>
+						</div>
+					</div>
+					<section class="summary-band" aria-label="주간 요약">
+						<div class="summary-grid" id="summaryGrid"></div>
+					</section>
+
+					<section class="table-section" aria-label="주간 학습 입력">
+						<div class="table-wrap" id="weeklyTable"></div>
+					</section>
+				</section>
+
+				<section class="page-view" id="historyPage" data-page="history">
+					<section class="history-section" aria-label="과거 학습 탐색">
+						<div class="section-heading">
+							<div>
+								<h2>과거 학습 탐색</h2>
+								<p>학생, 과목, 교재, 메모로 이전 기록을 찾을 수 있습니다.</p>
+							</div>
+						</div>
+						<div class="history-tools">
+							<select id="historyChild"></select>
+							<select id="historySubjectSetting"></select>
+							<select id="historySubject"></select>
+							<input id="historySearch" placeholder="검색어 입력" />
+						</div>
+						<div class="history-list" id="historyList"></div>
+					</section>
+				</section>
+
+				<section class="page-view" id="pendingPage" data-page="pending">
+					<section class="history-section" aria-label="미완료 계획">
+						<div class="section-heading">
+							<div>
+								<h2>미완료 계획</h2>
+								<p>오늘까지 완료되지 않은 학습 계획을 학생별로 확인하세요.</p>
+							</div>
+						</div>
+						<div class="history-tools">
+							<select id="pendingChild"></select>
+							<select id="pendingSubjectSetting"></select>
+							<select id="pendingRange">
+								<option value="due">오늘까지</option>
+								<option value="week">이번 주 전체</option>
+								<option value="all">전체 미완료</option>
+							</select>
+						</div>
+						<div class="history-list" id="pendingList"></div>
+					</section>
+				</section>
+
+				<section class="page-view" id="statsPage" data-page="stats">
+					<section class="stats-section" aria-label="학습 통계">
+						<div class="section-heading">
+							<div>
+								<h2>학습 통계</h2>
+								<p>진행률, 학생별 기록, 과목별 분포의 흐름을 확인하세요.</p>
+							</div>
+						</div>
+						<div class="stats-content" id="statsContent"></div>
+					</section>
+				</section>
+
+				<section class="page-view" id="myPage" data-page="mypage">
+					<section class="mypage-section" aria-label="마이페이지">
+						<div class="section-heading">
+							<div>
+								<h2>마이페이지</h2>
+								<p>등록된 교재와 학습 기록 현황을 한눈에 확인하세요.</p>
+							</div>
+						</div>
+						<div class="mypage-content" id="mypageContent"></div>
+					</section>
+				</section>
+
+				<section class="page-view" id="subjectsPage" data-page="subjects">
+					<section class="mypage-section" aria-label="과목 설정">
+						<div class="section-heading">
+							<div>
+								<h2>과목 설정</h2>
+								<p>교재 등록에 사용할 과목을 미리 만들고 색상을 정하세요.</p>
+							</div>
+						</div>
+						<div class="subpage-actions">
+							<button class="ghost subpage-back" type="button" data-target-page="mypage">‹ 마이페이지</button>
+							<button type="button" data-subject-action="add">과목 추가</button>
+						</div>
+						<div class="mypage-content" id="subjectsContent"></div>
+					</section>
+				</section>
+
+				<section class="page-view" id="rewardHistoryPage" data-page="reward-history">
+					<section class="reward-history-section" aria-label="보상 지급 이력">
+						<div class="section-heading">
+							<div>
+								<h2>보상 지급 이력</h2>
+								<p>학생별로 지급 완료 처리한 보상과 초기화 시점을 확인하세요.</p>
+							</div>
+						</div>
+						<div class="reward-history-content" id="rewardHistoryContent"></div>
+					</section>
+				</section>
+			</main>
+		</div>
+
+		<nav class="bottom-nav" aria-label="화면 이동">
+			<button class="nav-item active" type="button" data-target-page="weekly">주간 학습</button>
+			<button class="nav-item" type="button" data-target-page="stats">학습 통계</button>
+			<button class="nav-item" type="button" data-target-page="pending">미완료</button>
+			<button class="nav-item" type="button" data-target-page="history">과거 탐색</button>
+			<button class="nav-item" type="button" data-target-page="reward-history">보상 이력</button>
+			<button class="nav-item" type="button" data-target-page="mypage">마이페이지</button>
+		</nav>
+
+		<dialog id="entryDialog">
+			<form method="dialog" id="entryForm">
+				<div class="dialog-head">
+					<div>
+						<p class="eyebrow" id="entryMeta"></p>
+						<h3 id="entryTitle">학습 기록</h3>
+					</div>
+					<button class="icon-btn" id="closeEntryDialog" type="button" tabindex="-1" aria-label="닫기">×</button>
+				</div>
+				<label>
+					<span>학습량</span>
+					<input id="entryAmount" placeholder="예: 12쪽, 30분, 2강" />
+				</label>
+				<label>
+					<span>메모</span>
+					<textarea id="entryMemo" rows="4" placeholder="오답, 진도, 복습 내용 등을 적어두세요."></textarea>
+				</label>
+				<label class="check-row">
+					<input id="entryCompleted" type="checkbox" />
+					<span>학습 완료</span>
+				</label>
+				<div class="dialog-actions entry-dialog-actions">
+					<div class="entry-plan-actions">
+						<button class="ghost" id="pushPlan" value="push" type="button">이후 계획 하루 밀기</button>
+						<button class="ghost" id="pullPlan" value="pull" type="button">이후 계획 하루 당기기</button>
+					</div>
+					<div class="entry-primary-actions">
+						<button class="danger" id="deleteEntry" value="delete" type="button">삭제</button>
+						<button class="ghost" id="cancelEntryDialog" type="button">취소</button>
+						<button id="saveEntry" value="save" type="submit">저장</button>
+					</div>
+				</div>
+			</form>
+		</dialog>
+
+		<dialog id="subjectDialog">
+			<form method="dialog" id="subjectForm">
+				<div class="dialog-head">
+					<div>
+						<p class="eyebrow">Book Setup</p>
+						<h3>교재 등록</h3>
+					</div>
+					<button class="icon-btn" value="cancel" type="submit" formnovalidate tabindex="-1" aria-label="닫기" data-child-cancel>×</button>
+				</div>
+				<label>
+					<span>학생</span>
+					<select id="subjectChild"></select>
+				</label>
+				<label>
+					<span>과목</span>
+					<select id="subjectName" required></select>
+				</label>
+				<label>
+					<span>교재</span>
+					<input id="bookName" required placeholder="예: 최상위 수학 4-1" />
+				</label>
+				<div class="schedule-field">
+					<span>수업 요일</span>
+					<div class="schedule-days">
+						<label><input type="checkbox" name="scheduleDay" value="월" />월</label>
+						<label><input type="checkbox" name="scheduleDay" value="화" />화</label>
+						<label><input type="checkbox" name="scheduleDay" value="수" />수</label>
+						<label><input type="checkbox" name="scheduleDay" value="목" />목</label>
+						<label><input type="checkbox" name="scheduleDay" value="금" />금</label>
+						<label><input type="checkbox" name="scheduleDay" value="토" />토</label>
+						<label><input type="checkbox" name="scheduleDay" value="일" />일</label>
+					</div>
+				</div>
+				<label>
+					<span>수업 시간</span>
+					<div class="time-select-group">
+						<select id="scheduleHour" aria-label="수업 시간 시"></select>
+						<select id="scheduleMinute" aria-label="수업 시간 분"></select>
+					</div>
+				</label>
+				<div class="date-pair">
+					<label>
+						<span>교재 시작일</span>
+						<input id="bookStartDate" type="date" />
+					</label>
+					<label>
+						<span>교재 종료일</span>
+						<input id="bookEndDate" type="date" />
+					</label>
+				</div>
+				<label class="auto-plan-check">
+					<input id="autoCreatePlan" type="checkbox" />
+					<span>기간과 요일에 맞춰 가계획 자동 생성</span>
+				</label>
+				<div class="reward-option">
+					<label class="auto-plan-check">
+						<input id="rewardEnabled" type="checkbox" />
+						<span>학습 완료 시 보상 누적</span>
+					</label>
+					<div class="reward-fields">
+						<label>
+							<span>보상</span>
+							<input id="rewardAmount" type="number" min="0" step="1" placeholder="예: 1" />
+						</label>
+						<label>
+							<span>단위</span>
+							<input id="rewardLabel" maxlength="20" placeholder="예: 포인트, 스티커" />
+						</label>
+					</div>
+				</div>
+				<div class="dialog-actions">
+					<span></span>
+					<button class="ghost" value="cancel" type="submit" formnovalidate data-child-cancel>취소</button>
+					<button value="save-subject" type="submit">등록</button>
+				</div>
+			</form>
+		</dialog>
+
+		<dialog id="copyDialog">
+			<form method="dialog" id="copyForm">
+				<div class="dialog-head">
+					<div>
+						<p class="eyebrow" id="copyMeta"></p>
+						<h3 id="copyTitle">교재 복사</h3>
+					</div>
+					<button class="icon-btn" value="cancel" type="submit" formnovalidate tabindex="-1" aria-label="닫기">×</button>
+				</div>
+				<label>
+					<span>복사할 학생</span>
+					<select id="copyTargetChild"></select>
+				</label>
+				<label>
+					<span>시작일</span>
+					<input id="copyStartDate" type="date" required />
+				</label>
+				<p class="copy-help" id="copyHelp"></p>
+				<div class="dialog-actions">
+					<span></span>
+					<button class="ghost" value="cancel" type="submit" formnovalidate>취소</button>
+					<button id="confirmCopy" value="copy" type="submit">복사</button>
+				</div>
+			</form>
+		</dialog>
+
+		<dialog id="bookDialog">
+			<form method="dialog" id="bookForm">
+				<div class="dialog-head">
+					<div>
+						<p class="eyebrow" id="bookMeta"></p>
+						<h3>교재 수정</h3>
+					</div>
+					<button class="icon-btn" value="cancel" type="submit" formnovalidate tabindex="-1" aria-label="닫기">×</button>
+				</div>
+				<label>
+					<span>과목</span>
+					<select id="editSubjectName" required></select>
+				</label>
+				<label>
+					<span>교재</span>
+					<input id="editBookName" required />
+				</label>
+				<div class="schedule-field">
+					<span>수업 요일</span>
+					<div class="schedule-days">
+						<label><input type="checkbox" name="editScheduleDay" value="월" />월</label>
+						<label><input type="checkbox" name="editScheduleDay" value="화" />화</label>
+						<label><input type="checkbox" name="editScheduleDay" value="수" />수</label>
+						<label><input type="checkbox" name="editScheduleDay" value="목" />목</label>
+						<label><input type="checkbox" name="editScheduleDay" value="금" />금</label>
+						<label><input type="checkbox" name="editScheduleDay" value="토" />토</label>
+						<label><input type="checkbox" name="editScheduleDay" value="일" />일</label>
+					</div>
+				</div>
+				<label>
+					<span>수업 시간</span>
+					<div class="time-select-group">
+						<select id="editScheduleHour" aria-label="수업 시간 시"></select>
+						<select id="editScheduleMinute" aria-label="수업 시간 분"></select>
+					</div>
+				</label>
+				<div class="date-pair">
+					<label>
+						<span>교재 시작일</span>
+						<input id="editBookStartDate" type="date" />
+					</label>
+					<label>
+						<span>교재 종료일</span>
+						<input id="editBookEndDate" type="date" />
+					</label>
+				</div>
+				<label class="auto-plan-check">
+					<input id="editRegeneratePlan" type="checkbox" />
+					<span>저장 후 빈 가계획 다시 생성</span>
+				</label>
+				<div class="reward-option">
+					<label class="auto-plan-check">
+						<input id="editRewardEnabled" type="checkbox" />
+						<span>학습 완료 시 보상 누적</span>
+					</label>
+					<div class="reward-fields">
+						<label>
+							<span>보상</span>
+							<input id="editRewardAmount" type="number" min="0" step="1" placeholder="예: 1" />
+						</label>
+						<label>
+							<span>단위</span>
+							<input id="editRewardLabel" maxlength="20" placeholder="예: 포인트, 스티커" />
+						</label>
+					</div>
+				</div>
+				<div class="dialog-actions">
+					<span></span>
+					<button class="ghost" value="cancel" type="submit" formnovalidate>취소</button>
+					<button id="saveBook" value="save-book" type="submit">저장</button>
+				</div>
+			</form>
+		</dialog>
+
+		<dialog id="childAccountDialog">
+			<form method="dialog" id="childAccountForm">
+				<div class="dialog-head">
+					<div>
+						<p class="eyebrow" id="childAccountMeta">Student Account</p>
+						<h3 id="childAccountTitle">학생 등록</h3>
+					</div>
+					<button class="icon-btn" value="cancel" type="submit" formnovalidate tabindex="-1" aria-label="닫기">×</button>
+				</div>
+				<label>
+					<span>학생 이름</span>
+					<input id="childAccountName" required placeholder="예: 민준" />
+				</label>
+				<label>
+					<span>생일</span>
+					<input id="childBirthMonth" type="date" />
+				</label>
+				<label>
+					<span>학생 아이디</span>
+					<div class="verify-row">
+						<input id="childLoginId" autocomplete="username" placeholder="예: minjun01" />
+						<button class="ghost" type="button" id="verifyChildLoginId">중복 확인</button>
+					</div>
+					<p class="field-help" id="childLoginIdHelp"></p>
+				</label>
+				<label>
+					<span>비밀번호</span>
+					<input id="childPassword" type="password" autocomplete="new-password" placeholder="비밀번호" />
+				</label>
+				<label>
+					<span>비밀번호 확인</span>
+					<input id="childPasswordConfirm" type="password" autocomplete="new-password" placeholder="비밀번호 한 번 더 입력" />
+				</label>
+				<div class="dialog-actions">
+					<span></span>
+					<button class="ghost" value="cancel" type="submit" formnovalidate>취소</button>
+					<button id="saveChildAccount" value="save-child" type="submit">저장</button>
+				</div>
+			</form>
+		</dialog>
+
+		<dialog id="subjectSettingDialog">
+			<form method="dialog" id="subjectSettingForm">
+				<div class="dialog-head">
+					<div>
+						<p class="eyebrow" id="subjectSettingMeta">Subject Setup</p>
+						<h3 id="subjectSettingTitle">과목 추가</h3>
+					</div>
+					<button class="icon-btn" value="cancel" type="submit" formnovalidate tabindex="-1" aria-label="닫기">×</button>
+				</div>
+				<label>
+					<span>과목명</span>
+					<input id="subjectSettingName" required placeholder="예: 논술" />
+				</label>
+				<div id="subjectSettingColorField"></div>
+				<div class="dialog-actions">
+					<span></span>
+					<button class="ghost" value="cancel" type="submit" formnovalidate>취소</button>
+					<button id="saveSubjectSetting" value="save-subject-setting" type="submit">저장</button>
+				</div>
+			</form>
+		</dialog>
+
+		<dialog id="timetableDialog" class="timetable-dialog">
+			<div class="dialog-head">
+				<div>
+					<p class="eyebrow" id="timetableMeta"></p>
+					<h3 id="timetableTitle">주간 시간표</h3>
+				</div>
+				<button class="icon-btn no-print" id="closeTimetable" type="button" aria-label="닫기">×</button>
+			</div>
+			<div id="timetableContent"></div>
+			<div class="dialog-actions no-print">
+				<span></span>
+				<button class="ghost" id="printTimetable" type="button">출력</button>
+			</div>
+		</dialog>
+
+		<dialog id="rewardResetDialog">
+			<form method="dialog" id="rewardResetForm">
+				<div class="dialog-head">
+					<div>
+						<p class="eyebrow" id="rewardResetMeta"></p>
+						<h3>보상 지급 확인</h3>
+					</div>
+					<button class="icon-btn" value="cancel" type="submit" formnovalidate tabindex="-1" aria-label="닫기">×</button>
+				</div>
+				<p class="password-reset-help" id="rewardResetSummary"></p>
+				<div class="reward-reset-list" id="rewardResetList"></div>
+				<div class="dialog-actions">
+					<span></span>
+					<button class="ghost" value="cancel" type="submit" formnovalidate>취소</button>
+					<button value="confirm-reset" type="submit">지급 완료 처리</button>
+				</div>
+			</form>
+		</dialog>
+
+		<script src="./app.js"></script>
+	</body>
+</html>

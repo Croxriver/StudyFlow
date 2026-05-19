@@ -1,0 +1,158 @@
+const express = require("express");
+const { getPool, sql } = require("../db");
+const { requireAuth, requireStudent } = require("../middleware/auth");
+
+const router = express.Router();
+
+function toDateText(value) {
+  if (!value) return "";
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value).slice(0, 10);
+}
+
+function toTimeText(value) {
+  if (!value) return "";
+  return String(value).slice(0, 5);
+}
+
+function toIsoText(value) {
+  if (!value) return "";
+  if (value instanceof Date) return value.toISOString();
+  return String(value);
+}
+
+function entryKey(subjectId, date) {
+  return `${subjectId}__${date}`;
+}
+
+function buildStudentState(recordsets) {
+  const [studentRows = [], bookRows = [], dayRows = [], entryRows = []] = recordsets;
+  const student = studentRows[0];
+
+  if (!student) return null;
+
+  const scheduleDaysByBook = new Map();
+  dayRows.forEach((row) => {
+    const key = String(row.bookId);
+    const days = scheduleDaysByBook.get(key) || [];
+    days.push(Number(row.dayOfWeek));
+    scheduleDaysByBook.set(key, days);
+  });
+
+  const subjects = bookRows.map((book) => ({
+    id: String(book.id),
+    subjectSettingId: String(book.subjectSettingId),
+    name: book.subjectName,
+    color: book.subjectColor,
+    book: book.book,
+    scheduleDays: scheduleDaysByBook.get(String(book.id)) || [],
+    scheduleTime: toTimeText(book.scheduleTime),
+    startDate: toDateText(book.startDate),
+    endDate: toDateText(book.endDate),
+    rewardEnabled: Boolean(book.rewardEnabled),
+    rewardAmount: Number(book.rewardAmount || 0),
+    rewardLabel: book.rewardLabel || "포인트"
+  }));
+
+  const entries = {};
+  entryRows.forEach((entry) => {
+    const date = toDateText(entry.studyDate);
+    const subjectId = String(entry.bookId);
+    const key = entryKey(subjectId, date);
+    entries[key] = {
+      key,
+      subjectId,
+      date,
+      amount: entry.amount || "",
+      memo: entry.memo || "",
+      completed: Boolean(entry.completed),
+      rewardAwarded: Boolean(entry.rewardAwarded),
+      rewardAmount: Number(entry.rewardAmount || 0),
+      rewardLabel: entry.rewardLabel || "포인트",
+      rewardRedeemed: Boolean(entry.rewardRedeemed),
+      rewardRedeemedAt: toIsoText(entry.rewardRedeemedAt),
+      updatedAt: toIsoText(entry.updatedAt)
+    };
+  });
+
+  return {
+    student: {
+      id: String(student.id),
+      name: student.name,
+      loginId: student.loginId || "",
+      birthMonth: toDateText(student.birthMonth),
+      teacherName: student.teacherName
+    },
+    subjects,
+    entries
+  };
+}
+
+router.get("/state", requireAuth, requireStudent, async (request, response, next) => {
+  try {
+    const pool = await getPool();
+    const result = await pool.request()
+      .input("teacher_user_id", sql.UniqueIdentifier, request.user.teacherUserId)
+      .input("child_id", sql.UniqueIdentifier, request.user.childId)
+      .execute("dbo.app_get_student_study_state");
+    const state = buildStudentState(result.recordsets);
+
+    if (!state) {
+      return response.status(404).json({
+        error: "student_not_found",
+        message: "Student was not found."
+      });
+    }
+
+    response.json({ state, persistence: "database" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.put("/entries", requireAuth, requireStudent, async (request, response, next) => {
+  try {
+    const { subjectId, date, amount = "", memo = "", completed = false } = request.body || {};
+
+    if (!subjectId || !date) {
+      return response.status(400).json({
+        error: "invalid_entry_request",
+        message: "Subject and date are required."
+      });
+    }
+
+    const pool = await getPool();
+    const result = await pool.request()
+      .input("teacher_user_id", sql.UniqueIdentifier, request.user.teacherUserId)
+      .input("child_id", sql.UniqueIdentifier, request.user.childId)
+      .input("book_id", sql.UniqueIdentifier, subjectId)
+      .input("study_date", sql.Date, date)
+      .input("amount", sql.NVarChar(200), String(amount || "").trim())
+      .input("memo", sql.NVarChar(1000), String(memo || "").trim())
+      .input("completed", sql.Bit, Boolean(completed))
+      .execute("dbo.app_update_student_entry");
+    const entry = result.recordset[0];
+    const studyDate = toDateText(entry.studyDate);
+
+    response.json({
+      entry: {
+        key: entryKey(String(entry.bookId), studyDate),
+        subjectId: String(entry.bookId),
+        date: studyDate,
+        amount: entry.amount || "",
+        memo: entry.memo || "",
+        completed: Boolean(entry.completed),
+        rewardAwarded: Boolean(entry.rewardAwarded),
+        rewardAmount: Number(entry.rewardAmount || 0),
+        rewardLabel: entry.rewardLabel || "포인트",
+        rewardRedeemed: Boolean(entry.rewardRedeemed),
+        rewardRedeemedAt: toIsoText(entry.rewardRedeemedAt),
+        updatedAt: toIsoText(entry.updatedAt)
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+module.exports = router;

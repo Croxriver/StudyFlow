@@ -1,0 +1,107 @@
+﻿<!doctype html>
+<html lang="ko">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="theme-color" content="#2f9d62" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+		<meta name="apple-mobile-web-app-title" content="스터디플로우" />
+		<title>로그인 | StudyFlow</title>
+		<script src="./theme.js"></script>
+		<script defer src="./pwa-register.js"></script>
+		<link rel="manifest" href="./manifest.webmanifest" />
+		<link rel="icon" href="./assets/studyflow-icon.svg" type="image/svg+xml" />
+		<link rel="apple-touch-icon" href="./assets/apple-touch-icon.png" />
+		<link rel="stylesheet" href="./styles.css" />
+	</head>
+	<body class="login-page">
+		<main class="login-shell">
+			<section class="login-panel" aria-label="로그인">
+				<div class="brand-lockup login-brand">
+					<div>
+						<p class="eyebrow">StudyFlow</p>
+						<h1>스터디플로우 로그인</h1>
+					</div>
+				</div>
+				<p class="login-copy">계정 유형을 선택한 후 로그인 정보를 입력해 주세요.</p>
+
+				<form class="login-form" data-auth-form="login">
+					<div class="login-mode-switch" role="radiogroup" aria-label="로그인 유형">
+						<label>
+							<input type="radio" name="loginMode" value="teacher" checked />
+							<span>선생님</span>
+						</label>
+						<label>
+							<input type="radio" name="loginMode" value="student" />
+							<span>학생</span>
+						</label>
+					</div>
+					<label data-teacher-login-field>
+						<span>이메일</span>
+						<input type="email" name="email" autocomplete="email" required placeholder="manager@example.com" />
+					</label>
+					<label data-student-login-field hidden>
+						<span>학생 아이디</span>
+						<input name="loginId" autocomplete="username" placeholder="student01" />
+					</label>
+					<label>
+						<span>비밀번호</span>
+						<input type="password" name="password" autocomplete="current-password" required placeholder="비밀번호" />
+					</label>
+					<button type="submit">로그인</button>
+				</form>
+				<p class="form-message" data-auth-message role="status" aria-live="polite"></p>
+				<a class="signup-link-button" href="./signup.html">회원가입</a>
+				<button class="forgot-password-button" id="forgotPasswordButton" type="button">비밀번호 초기화</button>
+			</section>
+		</main>
+
+		<dialog id="forgotPasswordDialog">
+			<form method="dialog" id="forgotPasswordForm">
+				<div class="dialog-head">
+					<div>
+						<p class="eyebrow">Password Reset</p>
+						<h3>비밀번호 찾기</h3>
+					</div>
+					<button class="icon-btn" value="cancel" type="submit" formnovalidate tabindex="-1" aria-label="닫기">×</button>
+				</div>
+				<p class="password-reset-help">선생님 계정은 가입 정보 확인 후 새 비밀번호로 변경할 수 있습니다.</p>
+				<label>
+					<span>이메일</span>
+					<input name="resetEmail" type="email" autocomplete="email" required placeholder="manager@example.com" />
+				</label>
+				<label>
+					<span>가입 이름</span>
+					<input name="resetName" required placeholder="가입 시 입력한 이름" />
+				</label>
+				<label>
+					<span>전화번호</span>
+					<input name="resetPhone" autocomplete="tel" placeholder="가입 시 입력한 전화번호" />
+				</label>
+				<label>
+					<span>새 비밀번호</span>
+					<input name="resetPassword" type="password" autocomplete="new-password" required placeholder="새 비밀번호" />
+				</label>
+				<label>
+					<span>새 비밀번호 확인</span>
+					<input name="resetPasswordConfirm" type="password" autocomplete="new-password" required placeholder="새 비밀번호 한 번 더 입력" />
+				</label>
+				<div class="student-reset-note">
+					<strong>학생 계정 비밀번호</strong>
+					<p>학생 비밀번호는 선생님이 마이페이지의 학생 계정 관리에서 새 비밀번호를 설정해 주세요.</p>
+				</div>
+				<p class="form-message" id="forgotPasswordMessage" role="status" aria-live="polite"></p>
+				<div class="dialog-actions">
+					<span></span>
+					<button class="ghost" value="cancel" type="submit" formnovalidate>취소</button>
+					<button value="reset-password" type="submit">비밀번호 재설정</button>
+				</div>
+			</form>
+		</dialog>
+		<div class="auth-overlay" id="authOverlay" hidden>
+			<div class="auth-spinner"></div>
+		</div>
+		<script src="./auth.js"></script>
+	</body>
+</html>

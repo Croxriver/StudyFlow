@@ -1,0 +1,109 @@
+﻿<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#2f9d62">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="스터디플로우">
+    <title>학생 학습 계획 | StudyFlow</title>
+    <script src="./theme.js"></script>
+    <script defer src="./pwa-register.js"></script>
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" href="./assets/studyflow-icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body class="student-page">
+    <div class="app student-app">
+      <header class="topbar">
+        <div>
+          <div class="brand-lockup">
+            <img src="./assets/studyflow-icon.svg" alt="" aria-hidden="true">
+            <div>
+              <p class="eyebrow">스터디플로우 학생</p>
+              <h1 id="studentTitle">내 학습 계획</h1>
+            </div>
+          </div>
+          <p class="today-label" id="studentTodayLabel"></p>
+          <div class="sync-status" id="studentSyncStatus" role="status" aria-live="polite">
+            <span id="studentSyncStatusText">학습 계획을 불러오는 중</span>
+          </div>
+        </div>
+        <section class="profile-summary" aria-label="학생 정보">
+          <div class="profile-avatar" aria-hidden="true">S</div>
+          <div class="profile-text">
+            <strong id="studentName">학생</strong>
+            <span id="teacherName">선생님</span>
+          </div>
+          <label class="theme-switch" title="다크 모드">
+            <span>Dark</span>
+            <input type="checkbox" data-theme-toggle aria-label="다크 모드">
+            <span class="theme-switch-track" aria-hidden="true"></span>
+          </label>
+          <button class="ghost logout-button" id="studentLogout" type="button">로그아웃</button>
+        </section>
+      </header>
+
+      <main>
+        <section class="student-hero" aria-label="학생 요약">
+          <article>
+            <span>오늘 완료</span>
+            <strong id="todayCompleteCount">0 / 0</strong>
+          </article>
+          <article>
+            <span>이번 주 계획</span>
+            <strong id="weekPlanCount">0</strong>
+          </article>
+          <article>
+            <span>미지급 보상</span>
+            <strong id="studentRewardTotal">0포인트</strong>
+          </article>
+        </section>
+
+        <section class="student-section" aria-label="오늘의 학습">
+          <div class="section-heading">
+            <div>
+              <h2>오늘의 학습</h2>
+              <p>오늘 해야 할 학습을 확인하고 완료를 체크하세요.</p>
+            </div>
+          </div>
+          <div class="student-plan-list" id="todayPlanList"></div>
+        </section>
+
+        <section class="student-section" aria-label="이번 주 학습">
+          <div class="section-heading">
+            <div>
+              <h2>이번 주 학습</h2>
+              <p id="studentWeekRange"></p>
+            </div>
+            <div class="student-week-tools">
+              <button class="icon-btn" id="studentPrevWeek" type="button" aria-label="이전 주">‹</button>
+              <button class="ghost" id="studentThisWeek" type="button">이번 주</button>
+              <button class="icon-btn" id="studentNextWeek" type="button" aria-label="다음 주">›</button>
+              <select id="studentPlanFilter" aria-label="학습 계획 필터">
+                <option value="all">전체</option>
+                <option value="pending">미완료</option>
+                <option value="completed">완료</option>
+              </select>
+            </div>
+          </div>
+          <div class="student-plan-list" id="weekPlanList"></div>
+        </section>
+
+        <section class="student-section" aria-label="보상 지급 이력">
+          <div class="section-heading">
+            <div>
+              <h2>보상 지급 이력</h2>
+              <p>선생님이 지급 완료 처리한 보상을 확인하세요.</p>
+            </div>
+          </div>
+          <div class="reward-history-content" id="studentRewardHistory"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./student.js"></script>
+  </body>
+</html>

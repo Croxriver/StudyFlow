@@ -1,0 +1,66 @@
+﻿<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#2f9d62">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="스터디플로우">
+    <title>회원가입 | StudyFlow</title>
+    <script src="./theme.js"></script>
+    <script defer src="./pwa-register.js"></script>
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" href="./assets/studyflow-icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body class="login-page">
+    <main class="login-shell">
+      <section class="login-panel signup-panel" aria-label="회원가입">
+        <div class="brand-lockup login-brand">
+          <img src="./assets/studyflow-icon.svg" alt="" aria-hidden="true">
+          <div>
+            <p class="eyebrow">StudyFlow</p>
+            <h1>회원가입</h1>
+          </div>
+        </div>
+        <p class="login-copy">스터디플로우 계정 생성을 위한 기본 정보를 입력하세요.</p>
+
+        <form class="login-form" data-auth-form="signup">
+          <label>
+            <span>이메일</span>
+            <input type="email" name="email" autocomplete="email" required placeholder="manager@example.com">
+          </label>
+          <label>
+            <span>비밀번호</span>
+            <input type="password" name="password" autocomplete="new-password" required placeholder="비밀번호">
+          </label>
+          <label>
+            <span>비밀번호 확인</span>
+            <input type="password" name="passwordConfirm" autocomplete="new-password" required placeholder="비밀번호 확인">
+          </label>
+          <label>
+            <span>이름</span>
+            <input type="text" name="name" autocomplete="name" required placeholder="이름">
+          </label>
+          <label>
+            <span>휴대폰</span>
+            <input type="tel" name="phone" autocomplete="tel" placeholder="010-0000-0000">
+          </label>
+          <label class="marketing-check">
+            <input type="checkbox" name="marketingConsent">
+            <span>마케팅 수신 동의</span>
+          </label>
+          <button type="submit">가입하기</button>
+        </form>
+        <p class="form-message" data-auth-message role="status" aria-live="polite"></p>
+        <a class="signup-link-button" href="./login.html">로그인으로 돌아가기</a>
+      </section>
+    </main>
+    <div class="auth-overlay" id="authOverlay" hidden>
+      <div class="auth-spinner"></div>
+    </div>
+    <script src="./auth.js"></script>
+  </body>
+</html>
