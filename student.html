@@ -17,92 +17,175 @@
   </head>
   <body class="student-page">
     <div class="app student-app">
-      <header class="topbar">
-        <div>
+      <header class="topbar student-topbar">
+        <div class="topbar-main student-topbar-main">
           <div class="brand-lockup">
-            <img src="./assets/studyflow-icon.svg" alt="" aria-hidden="true">
-            <div>
-              <p class="eyebrow">스터디플로우 학생</p>
-              <h1 id="studentTitle">내 학습 계획</h1>
-            </div>
-          </div>
-          <p class="today-label" id="studentTodayLabel"></p>
-          <div class="sync-status" id="studentSyncStatus" role="status" aria-live="polite">
-            <span id="studentSyncStatusText">학습 계획을 불러오는 중</span>
+            <img class="brand-text-logo" src="./assets/logo_text.svg" alt="StudyFlow 스터디플로우">
           </div>
         </div>
-        <section class="profile-summary" aria-label="학생 정보">
-          <div class="profile-avatar" aria-hidden="true">S</div>
-          <div class="profile-text">
-            <strong id="studentName">학생</strong>
-            <span id="teacherName">선생님</span>
-          </div>
-          <label class="theme-switch" title="다크 모드">
-            <span>Dark</span>
-            <input type="checkbox" data-theme-toggle aria-label="다크 모드">
-            <span class="theme-switch-track" aria-hidden="true"></span>
-          </label>
-          <button class="ghost logout-button" id="studentLogout" type="button">로그아웃</button>
-        </section>
       </header>
 
       <main>
-        <section class="student-hero" aria-label="학생 요약">
-          <article>
-            <span>오늘 완료</span>
-            <strong id="todayCompleteCount">0 / 0</strong>
-          </article>
-          <article>
-            <span>이번 주 계획</span>
-            <strong id="weekPlanCount">0</strong>
-          </article>
-          <article>
-            <span>미지급 보상</span>
-            <strong id="studentRewardTotal">0포인트</strong>
-          </article>
-        </section>
-
-        <section class="student-section" aria-label="오늘의 학습">
+        <section class="page-view active" id="studentTodayPage" data-page="today">
           <div class="section-heading">
             <div>
               <h2>오늘의 학습</h2>
               <p>오늘 해야 할 학습을 확인하고 완료를 체크하세요.</p>
             </div>
           </div>
-          <div class="student-plan-list" id="todayPlanList"></div>
+
+          <section class="student-hero" aria-label="학생 요약">
+            <article>
+              <span>오늘 완료</span>
+              <strong id="todayCompleteCount">0 / 0</strong>
+            </article>
+            <article>
+              <span>이번 주 계획</span>
+              <strong id="weekPlanCount">0</strong>
+            </article>
+            <article>
+              <span>미지급 보상</span>
+              <strong id="studentRewardTotal">0포인트</strong>
+            </article>
+          </section>
+
+          <section class="student-plan-section" aria-label="오늘의 학습 목록">
+            <div class="student-plan-list" id="todayPlanList"></div>
+          </section>
         </section>
 
-        <section class="student-section" aria-label="이번 주 학습">
-          <div class="section-heading">
-            <div>
-              <h2>이번 주 학습</h2>
-              <p id="studentWeekRange"></p>
+        <section class="page-view" id="studentWeekPage" data-page="week">
+          <section class="student-section" aria-label="이번 주 학습">
+            <div class="section-heading">
+              <div>
+                <h2>이번 주 학습</h2>
+                <p id="studentWeekRange"></p>
+              </div>
+              <div class="student-week-tools">
+                <button class="icon-btn" id="studentPrevWeek" type="button" aria-label="이전 주">‹</button>
+                <button class="ghost" id="studentThisWeek" type="button">이번 주</button>
+                <button class="icon-btn" id="studentNextWeek" type="button" aria-label="다음 주">›</button>
+                <select id="studentPlanFilter" aria-label="학습 계획 필터">
+                  <option value="all">전체</option>
+                  <option value="pending">미완료</option>
+                  <option value="completed">완료</option>
+                </select>
+              </div>
             </div>
-            <div class="student-week-tools">
-              <button class="icon-btn" id="studentPrevWeek" type="button" aria-label="이전 주">‹</button>
-              <button class="ghost" id="studentThisWeek" type="button">이번 주</button>
-              <button class="icon-btn" id="studentNextWeek" type="button" aria-label="다음 주">›</button>
-              <select id="studentPlanFilter" aria-label="학습 계획 필터">
-                <option value="all">전체</option>
-                <option value="pending">미완료</option>
-                <option value="completed">완료</option>
-              </select>
-            </div>
-          </div>
-          <div class="student-plan-list" id="weekPlanList"></div>
+            <div class="student-plan-list" id="weekPlanList"></div>
+          </section>
         </section>
 
-        <section class="student-section" aria-label="보상 지급 이력">
-          <div class="section-heading">
-            <div>
-              <h2>보상 지급 이력</h2>
-              <p>선생님이 지급 완료 처리한 보상을 확인하세요.</p>
+        <section class="page-view" id="studentRewardsPage" data-page="rewards">
+          <section class="student-section" aria-label="보상 지급 이력">
+            <div class="section-heading">
+              <div>
+                <h2>보상 이력</h2>
+                <p>받을 수 있는 보상과 지급 완료된 보상을 확인하세요.</p>
+              </div>
             </div>
-          </div>
-          <div class="reward-history-content" id="studentRewardHistory"></div>
+            <section class="student-hero student-reward-summary" aria-label="보상 요약">
+              <article>
+                <span>미지급 보상</span>
+                <strong id="studentRewardPageTotal">0포인트</strong>
+              </article>
+              <article>
+                <span>지급 완료 건</span>
+                <strong id="studentRewardHistoryCount">0</strong>
+              </article>
+            </section>
+            <div class="reward-history-content" id="studentRewardHistory"></div>
+          </section>
+        </section>
+
+        <section class="page-view" id="studentMyPage" data-page="mypage">
+          <section class="student-section student-mypage-section" aria-label="마이페이지">
+            <div class="section-heading">
+              <div>
+                <h2>마이페이지</h2>
+                <p>학생 정보, 화면 설정, 계정 관리를 확인하세요.</p>
+              </div>
+            </div>
+            <div class="student-mypage-content" id="studentMypageContent">
+              <section class="student-profile-panel" aria-label="학생 정보">
+                <div class="profile-avatar" id="studentAvatar" aria-hidden="true">S</div>
+                <div class="profile-text">
+                  <strong id="studentName">학생</strong>
+                  <span id="teacherName">선생님</span>
+                </div>
+              </section>
+
+              <section class="student-setting-panel" aria-label="화면 설정">
+                <div>
+                  <strong>화면 설정</strong>
+                  <p>밝은 화면과 어두운 화면을 전환합니다.</p>
+                </div>
+                <label class="theme-switch icon-theme-switch" title="라이트/다크 모드 전환" aria-label="라이트/다크 모드 전환">
+                  <input type="checkbox" data-theme-toggle aria-label="다크 모드">
+                  <span class="theme-switch-track" aria-hidden="true">
+                    <svg class="theme-switch-icon theme-switch-sun" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                      <circle cx="12" cy="12" r="4"></circle>
+                      <path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19"></path>
+                    </svg>
+                    <svg class="theme-switch-icon theme-switch-moon" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                      <path d="M20 15.2A7.6 7.6 0 0 1 8.8 4a8 8 0 1 0 11.2 11.2Z"></path>
+                    </svg>
+                  </span>
+                </label>
+              </section>
+
+              <section class="student-setting-panel" aria-label="계정 관리">
+                <div>
+                  <strong>계정</strong>
+                  <p id="studentAccountSummary">로그인 정보를 안전하게 관리하세요.</p>
+                </div>
+                <button class="ghost logout-button" id="studentLogout" type="button">로그아웃</button>
+              </section>
+            </div>
+          </section>
         </section>
       </main>
     </div>
+
+    <section class="study-session-screen" id="studySessionScreen" hidden aria-live="polite">
+      <div class="study-session-panel">
+        <img class="study-session-logo" src="./assets/logo_text.svg" alt="StudyFlow 스터디플로우">
+        <div class="study-session-progress" id="studySessionProgress" aria-hidden="true">
+          <div class="study-session-progress-inner"></div>
+        </div>
+        <div class="study-session-copy">
+          <p class="eyebrow">Study in progress</p>
+          <h2 id="studySessionTitle">학습 중</h2>
+          <p id="studySessionMeta"></p>
+          <p class="study-session-amount" id="studySessionAmount">학습량 미입력</p>
+        </div>
+        <div class="study-session-stats" aria-label="학습 시간">
+          <article>
+            <span>학습 시작 시간</span>
+            <strong id="studySessionStartTime">--:--</strong>
+          </article>
+          <article>
+            <span>현재 누적 시간</span>
+            <strong id="studySessionElapsed">00:00:00</strong>
+          </article>
+        </div>
+        <label class="study-session-feedback">
+          <span>간단한 피드백</span>
+          <textarea id="studySessionFeedback" rows="3" maxlength="1000" placeholder="오늘 학습에서 느낀 점을 짧게 남겨주세요."></textarea>
+        </label>
+        <div class="study-session-actions">
+          <button id="studySessionComplete" type="button">학습 완료</button>
+          <button class="ghost" id="studySessionCancel" type="button">학습 취소</button>
+        </div>
+      </div>
+    </section>
+
+    <nav class="bottom-nav" aria-label="학생 화면 이동">
+      <button class="nav-item active" type="button" data-target-page="today">오늘 학습</button>
+      <button class="nav-item" type="button" data-target-page="week">이번 주 학습</button>
+      <button class="nav-item" type="button" data-target-page="rewards">보상 이력</button>
+      <button class="nav-item" type="button" data-target-page="mypage">마이페이지</button>
+    </nav>
 
     <script src="./student.js"></script>
   </body>

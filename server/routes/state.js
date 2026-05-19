@@ -22,7 +22,17 @@ function toDateText(value) {
 
 function toTimeText(value) {
   if (!value) return "";
-  return String(value).slice(0, 5);
+  if (value instanceof Date) {
+    return `${String(value.getUTCHours()).padStart(2, "0")}:${String(value.getUTCMinutes()).padStart(2, "0")}`;
+  }
+
+  const match = String(value).match(/(\d{1,2}):(\d{2})/);
+  if (!match) return "";
+
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return "";
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 function toDayNumber(value) {
@@ -92,6 +102,9 @@ function buildStateFromRecordsets(recordsets) {
       rewardLabel: entry.rewardLabel || "포인트",
       rewardRedeemed: Boolean(entry.rewardRedeemed),
       rewardRedeemedAt: entry.rewardRedeemedAt ? new Date(entry.rewardRedeemedAt).toISOString() : "",
+      studyStartedAt: entry.studyStartedAt ? new Date(entry.studyStartedAt).toISOString() : "",
+      studyDurationSeconds: Number(entry.studyDurationSeconds || 0),
+      studentFeedback: entry.studentFeedback || "",
       updatedAt: entry.updatedAt ? new Date(entry.updatedAt).toISOString() : ""
     };
   });
@@ -165,7 +178,7 @@ async function normalizeStateForProcedure(state) {
         scheduleDays: (book.scheduleDays || [])
           .map(toDayNumber)
           .filter((day) => day !== null && day >= 0 && day <= 6),
-        scheduleTime: book.scheduleTime || "",
+        scheduleTime: toTimeText(book.scheduleTime ?? book.schedule_time),
         startDate: book.startDate || "",
         endDate: book.endDate || "",
         rewardEnabled: Boolean(book.rewardEnabled),
@@ -187,6 +200,9 @@ async function normalizeStateForProcedure(state) {
       rewardLabel: String(entry.rewardLabel || "").trim() || "포인트",
       rewardRedeemed: Boolean(entry.rewardRedeemed),
       rewardRedeemedAt: entry.rewardRedeemedAt || "",
+      studyStartedAt: entry.studyStartedAt || "",
+      studyDurationSeconds: Number.parseInt(entry.studyDurationSeconds, 10) > 0 ? Number.parseInt(entry.studyDurationSeconds, 10) : 0,
+      studentFeedback: String(entry.studentFeedback || "").trim(),
       updatedAt: entry.updatedAt || ""
     }))
     .filter((entry) => entry.bookId && entry.date);
@@ -266,6 +282,9 @@ router.put("/entries", requireAuth, requireTeacher, async (request, response, ne
       rewardLabel = "",
       rewardRedeemed = false,
       rewardRedeemedAt = "",
+      studyStartedAt = "",
+      studyDurationSeconds = 0,
+      studentFeedback = "",
       updatedAt = ""
     } = request.body || {};
 
@@ -290,6 +309,9 @@ router.put("/entries", requireAuth, requireTeacher, async (request, response, ne
       .input("reward_label", sql.NVarChar(50), String(rewardLabel || "").trim() || null)
       .input("reward_redeemed", sql.Bit, Boolean(rewardRedeemed))
       .input("reward_redeemed_at", sql.DateTime2, rewardRedeemedAt ? new Date(rewardRedeemedAt) : null)
+      .input("study_started_at", sql.DateTime2, studyStartedAt ? new Date(studyStartedAt) : null)
+      .input("study_duration_seconds", sql.Int, Math.max(0, Number.parseInt(studyDurationSeconds, 10) || 0))
+      .input("student_feedback", sql.NVarChar(1000), String(studentFeedback || "").trim())
       .input("updated_at", sql.DateTime2, updatedAt ? new Date(updatedAt) : null)
       .execute("dbo.app_update_teacher_entry");
     const entry = result.recordset[0];
@@ -309,6 +331,9 @@ router.put("/entries", requireAuth, requireTeacher, async (request, response, ne
         rewardLabel: entry.rewardLabel || "포인트",
         rewardRedeemed: Boolean(entry.rewardRedeemed),
         rewardRedeemedAt: entry.rewardRedeemedAt ? new Date(entry.rewardRedeemedAt).toISOString() : "",
+        studyStartedAt: entry.studyStartedAt ? new Date(entry.studyStartedAt).toISOString() : "",
+        studyDurationSeconds: Number(entry.studyDurationSeconds || 0),
+        studentFeedback: entry.studentFeedback || "",
         updatedAt: entry.updatedAt ? new Date(entry.updatedAt).toISOString() : ""
       }
     });

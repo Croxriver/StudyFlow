@@ -1,16 +1,14 @@
 ﻿const AUTH_TOKEN_KEY = "local-study-manager-token";
 const AUTH_USER_KEY = "local-study-manager-user";
-const authToken = localStorage.getItem(AUTH_TOKEN_KEY);
-const authUser = getAuthUser();
+const AUTH_TOKEN_KEY_PREFIX = `${AUTH_TOKEN_KEY}:`;
+const AUTH_USER_KEY_PREFIX = `${AUTH_USER_KEY}:`;
+const authSession = getSessionForRole("student");
+const authToken = authSession.token;
+const authUser = authSession.user;
 
 if (!authToken) {
 	window.location.replace("./login.html");
 	throw new Error("Authentication required.");
-}
-
-if (authUser.role !== "student") {
-	window.location.replace("./index.html");
-	throw new Error("Teacher mode uses the manager page.");
 }
 
 const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
@@ -21,18 +19,23 @@ let state = {
 };
 let weekStart = startOfWeek(new Date());
 let planFilter = "all";
+let activePage = "today";
+let activeStudy = null;
+let studyTimer = null;
 
 const els = {
-	title: document.querySelector("#studentTitle"),
-	todayLabel: document.querySelector("#studentTodayLabel"),
-	syncStatus: document.querySelector("#studentSyncStatus"),
-	syncStatusText: document.querySelector("#studentSyncStatusText"),
+	pageViews: document.querySelectorAll(".page-view"),
+	navItems: document.querySelectorAll(".nav-item"),
+	avatar: document.querySelector("#studentAvatar"),
 	studentName: document.querySelector("#studentName"),
 	teacherName: document.querySelector("#teacherName"),
+	accountSummary: document.querySelector("#studentAccountSummary"),
 	logout: document.querySelector("#studentLogout"),
 	todayCompleteCount: document.querySelector("#todayCompleteCount"),
 	weekPlanCount: document.querySelector("#weekPlanCount"),
 	rewardTotal: document.querySelector("#studentRewardTotal"),
+	rewardPageTotal: document.querySelector("#studentRewardPageTotal"),
+	rewardHistoryCount: document.querySelector("#studentRewardHistoryCount"),
 	prevWeek: document.querySelector("#studentPrevWeek"),
 	nextWeek: document.querySelector("#studentNextWeek"),
 	thisWeek: document.querySelector("#studentThisWeek"),
@@ -41,19 +44,80 @@ const els = {
 	todayPlanList: document.querySelector("#todayPlanList"),
 	weekPlanList: document.querySelector("#weekPlanList"),
 	rewardHistory: document.querySelector("#studentRewardHistory"),
+	studySessionScreen: document.querySelector("#studySessionScreen"),
+	studySessionProgress: document.querySelector("#studySessionProgress"),
+	studySessionTitle: document.querySelector("#studySessionTitle"),
+	studySessionMeta: document.querySelector("#studySessionMeta"),
+	studySessionAmount: document.querySelector("#studySessionAmount"),
+	studySessionStartTime: document.querySelector("#studySessionStartTime"),
+	studySessionElapsed: document.querySelector("#studySessionElapsed"),
+	studySessionFeedback: document.querySelector("#studySessionFeedback"),
+	studySessionComplete: document.querySelector("#studySessionComplete"),
+	studySessionCancel: document.querySelector("#studySessionCancel"),
+};
+
+const pageTitles = {
+	today: "오늘 학습",
+	week: "이번 주 학습",
+	rewards: "보상 이력",
+	mypage: "마이페이지",
 };
 
 function getAuthUser() {
 	try {
-		return JSON.parse(localStorage.getItem(AUTH_USER_KEY) || "{}");
+		return JSON.parse(localStorage.getItem(`${AUTH_USER_KEY_PREFIX}student`) || "{}");
+	} catch {
+		return {};
+	}
+}
+
+function getSessionForRole(role) {
+	const tokenKey = `${AUTH_TOKEN_KEY_PREFIX}${role}`;
+	const userKey = `${AUTH_USER_KEY_PREFIX}${role}`;
+	const token = localStorage.getItem(tokenKey);
+	const user = parseStoredUser(localStorage.getItem(userKey));
+
+	if (token && user.role === role) return { token, user };
+
+	const legacyToken = localStorage.getItem(AUTH_TOKEN_KEY);
+	const legacyUser = parseStoredUser(localStorage.getItem(AUTH_USER_KEY));
+	if (legacyToken && legacyUser.role === role) {
+		localStorage.setItem(tokenKey, legacyToken);
+		localStorage.setItem(userKey, JSON.stringify(legacyUser));
+		return { token: legacyToken, user: legacyUser };
+	}
+
+	return { token: "", user: {} };
+}
+
+function parseStoredUser(value) {
+	try {
+		return JSON.parse(value || "{}");
 	} catch {
 		return {};
 	}
 }
 
 function setStatus(text, isError = false) {
-	els.syncStatusText.textContent = text;
-	els.syncStatus.classList.toggle("is-error", isError);
+	if (isError) console.warn(`[StudyFlow Student] ${text}`);
+}
+
+function getStudentName() {
+	return state.student.name || authUser.name || "학생";
+}
+
+function getStudentInitial() {
+	return getStudentName().trim().charAt(0).toUpperCase() || "S";
+}
+
+function showPage(page) {
+	activePage = pageTitles[page] ? page : "today";
+	els.pageViews.forEach((view) => {
+		view.classList.toggle("active", view.dataset.page === activePage);
+	});
+	els.navItems.forEach((item) => {
+		item.classList.toggle("active", item.dataset.targetPage === activePage);
+	});
 }
 
 function formatDate(date) {
@@ -163,6 +227,34 @@ function formatDateTime(value) {
 	}).format(date);
 }
 
+function formatClockTime(date) {
+	return new Intl.DateTimeFormat("ko-KR", {
+		hour: "2-digit",
+		minute: "2-digit",
+	}).format(date);
+}
+
+function formatElapsed(ms) {
+	const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+	const hours = Math.floor(totalSeconds / 3600);
+	const minutes = Math.floor((totalSeconds % 3600) / 60);
+	const seconds = totalSeconds % 60;
+	return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
+}
+
+function formatDurationText(ms) {
+	const totalMinutes = Math.max(1, Math.round(ms / 60000));
+	const hours = Math.floor(totalMinutes / 60);
+	const minutes = totalMinutes % 60;
+	if (!hours) return `${minutes}분 학습`;
+	if (!minutes) return `${hours}시간 학습`;
+	return `${hours}시간 ${minutes}분 학습`;
+}
+
+function formatDurationSeconds(seconds) {
+	return formatDurationText((Number.parseInt(seconds, 10) || 0) * 1000);
+}
+
 function normalizeScheduleTime(value) {
 	const match = String(value || "")
 		.trim()
@@ -225,8 +317,8 @@ async function requestJson(path, options = {}) {
 	const data = await response.json().catch(() => ({}));
 
 	if (response.status === 401 || response.status === 403) {
-		localStorage.removeItem(AUTH_TOKEN_KEY);
-		localStorage.removeItem(AUTH_USER_KEY);
+		localStorage.removeItem(`${AUTH_TOKEN_KEY_PREFIX}student`);
+		localStorage.removeItem(`${AUTH_USER_KEY_PREFIX}student`);
 		window.location.replace("./login.html");
 		throw new Error("Authentication expired.");
 	}
@@ -257,14 +349,18 @@ function render() {
 	const weekPlans = getPlansForDates(getWeekDates());
 	const visibleWeekPlans = filterPlans(weekPlans);
 	const todayCompleted = todayPlans.filter((plan) => plan.entry?.completed).length;
+	const rewardTotals = getRewardTotals();
+	const rewardHistoryCount = getRewardHistoryBatches().length;
 
-	els.title.textContent = `${state.student.name || authUser.name || "학생"} 학습 계획`;
-	els.todayLabel.textContent = `오늘 ${todayText} ${new Intl.DateTimeFormat("ko-KR", { weekday: "long" }).format(today)}`;
-	els.studentName.textContent = state.student.name || authUser.name || "학생";
+	els.avatar.textContent = getStudentInitial();
+	els.studentName.textContent = getStudentName();
 	els.teacherName.textContent = state.student.teacherName ? `${state.student.teacherName} 선생님` : "선생님";
+	els.accountSummary.textContent = state.student.loginId ? `학생 ID ${state.student.loginId}` : "로그인 정보를 안전하게 관리하세요.";
 	els.todayCompleteCount.textContent = `${todayCompleted} / ${todayPlans.length}`;
 	els.weekPlanCount.textContent = String(weekPlans.length);
-	els.rewardTotal.textContent = formatRewardTotal(getRewardTotals());
+	els.rewardTotal.textContent = formatRewardTotal(rewardTotals);
+	els.rewardPageTotal.textContent = formatRewardTotal(rewardTotals);
+	els.rewardHistoryCount.textContent = String(rewardHistoryCount);
 	els.weekRange.textContent = `${formatDate(weekStart)} ~ ${formatDate(addDays(weekStart, 6))}`;
 	els.todayPlanList.innerHTML = renderPlanList(todayPlans, "오늘 학습 계획이 없습니다.");
 	els.weekPlanList.innerHTML = renderPlanList(visibleWeekPlans, "선택한 조건의 학습 계획이 없습니다.");
@@ -277,8 +373,21 @@ function renderPlanList(plans, emptyText) {
 	return plans
 		.map((plan) => {
 			const entry = plan.entry || {};
+			const amountText = entry.amount || "학습량 미입력";
+			const recordItems = [
+				entry.studyStartedAt ? `시작 ${formatDateTime(entry.studyStartedAt)}` : "",
+				entry.studyDurationSeconds ? `누적 ${formatDurationSeconds(entry.studyDurationSeconds)}` : "",
+				entry.studentFeedback ? `피드백 ${entry.studentFeedback}` : "",
+				!entry.studyStartedAt && !entry.studyDurationSeconds && entry.memo ? entry.memo : "",
+			].filter(Boolean);
+			const completedDetail = entry.completed
+				? `<div class="student-plan-record">
+            <span>완료 기록</span>
+            ${recordItems.map((item) => `<p>${escapeHtml(item)}</p>`).join("")}
+          </div>`
+				: "";
 			return `
-      <article class="student-plan-card ${entry.completed ? "is-complete" : ""} ${plan.date === formatDate(new Date()) ? "is-today" : ""}" data-subject-id="${escapeHtml(plan.subject.id)}" data-date="${escapeHtml(plan.date)}">
+      <article class="student-plan-card ${entry.completed ? "is-complete" : ""} ${plan.date === formatDate(new Date()) ? "is-today" : ""}" data-subject-id="${escapeHtml(plan.subject.id)}" data-date="${escapeHtml(plan.date)}" data-amount="${escapeHtml(amountText)}">
         <div class="student-plan-head">
           <div>
             <strong><span class="subject-color-dot" style="background:${escapeHtml(plan.subject.color || "#2f78d4")}" aria-hidden="true"></span>${escapeHtml(plan.subject.name)} · ${escapeHtml(plan.subject.book)}</strong>
@@ -290,20 +399,13 @@ function renderPlanList(plans, emptyText) {
             ${entry.rewardAwarded && !entry.rewardRedeemed ? `<span class="reward-badge">+${escapeHtml(formatReward(entry.rewardAmount, entry.rewardLabel))}</span>` : ""}
           </div>
         </div>
-        <label>
+        <div class="student-plan-amount">
           <span>학습량</span>
-          <input data-entry-amount value="${escapeHtml(entry.amount || "")}" placeholder="예: 12쪽, 30분, 2강">
-        </label>
-        <label>
-          <span>메모</span>
-          <textarea data-entry-memo rows="2" placeholder="어려웠던 점이나 다음 학습 메모">${escapeHtml(entry.memo || "")}</textarea>
-        </label>
-        <label class="check-row">
-          <input data-entry-completed type="checkbox" ${entry.completed ? "checked" : ""}>
-          <span>학습 완료</span>
-        </label>
+          <strong>${escapeHtml(amountText)}</strong>
+        </div>
+        ${completedDetail}
         <div class="student-plan-actions">
-          <button type="button" data-save-entry>저장</button>
+          <button type="button" data-start-study ${entry.completed ? "disabled" : ""}>${entry.completed ? "완료됨" : "학습 시작"}</button>
         </div>
       </article>
     `;
@@ -344,15 +446,7 @@ function renderRewardHistory() {
 		.join("");
 }
 
-async function saveEntry(card) {
-	const payload = {
-		subjectId: card.dataset.subjectId,
-		date: card.dataset.date,
-		amount: card.querySelector("[data-entry-amount]").value,
-		memo: card.querySelector("[data-entry-memo]").value,
-		completed: card.querySelector("[data-entry-completed]").checked,
-	};
-
+async function saveStudyEntry(payload) {
 	try {
 		setStatus("학습 기록 저장 중");
 		const data = await requestJson("/api/student/entries", {
@@ -364,10 +458,78 @@ async function saveEntry(card) {
 		setStatus("학습 기록 저장 완료");
 	} catch (error) {
 		setStatus(error.message || "저장하지 못했습니다.", true);
+		throw error;
+	}
+}
+
+function startStudy(card) {
+	const subject = state.subjects.find((item) => item.id === card.dataset.subjectId);
+	if (!subject) return;
+
+	activeStudy = {
+		subjectId: card.dataset.subjectId,
+		date: card.dataset.date,
+		subject,
+		amount: card.dataset.amount || "학습량 미입력",
+		startedAt: new Date(),
+	};
+	els.studySessionTitle.textContent = `${subject.name} · ${subject.book}`;
+	els.studySessionMeta.textContent = `${activeStudy.date} ${dayNames[parseDate(activeStudy.date).getDay()]} · ${normalizeScheduleTime(subject.scheduleTime) || "시간 미설정"}`;
+	els.studySessionAmount.textContent = `학습량 ${activeStudy.amount}`;
+	els.studySessionStartTime.textContent = formatClockTime(activeStudy.startedAt);
+	els.studySessionFeedback.value = "";
+	els.studySessionScreen.hidden = false;
+	document.body.classList.add("is-study-session-active");
+	updateStudyTimer();
+	studyTimer = window.setInterval(updateStudyTimer, 1000);
+}
+
+function updateStudyTimer() {
+	if (!activeStudy) return;
+	const elapsed = Date.now() - activeStudy.startedAt.getTime();
+	els.studySessionElapsed.textContent = formatElapsed(elapsed);
+	els.studySessionProgress.style.setProperty("--progress", `${Math.min(360, (Math.floor(elapsed / 1000) % 60) * 6)}deg`);
+}
+
+function stopStudyTimer() {
+	if (studyTimer) {
+		window.clearInterval(studyTimer);
+		studyTimer = null;
+	}
+}
+
+function closeStudySession() {
+	stopStudyTimer();
+	activeStudy = null;
+	els.studySessionScreen.hidden = true;
+	document.body.classList.remove("is-study-session-active");
+}
+
+async function completeStudy() {
+	if (!activeStudy) return;
+	const endedAt = new Date();
+	const elapsed = endedAt.getTime() - activeStudy.startedAt.getTime();
+	try {
+		els.studySessionComplete.disabled = true;
+		await saveStudyEntry({
+			subjectId: activeStudy.subjectId,
+			date: activeStudy.date,
+			amount: activeStudy.amount === "학습량 미입력" ? "" : activeStudy.amount,
+			memo: "",
+			completed: true,
+			studyStartedAt: activeStudy.startedAt.toISOString(),
+			studyDurationSeconds: Math.max(1, Math.round(elapsed / 1000)),
+			studentFeedback: els.studySessionFeedback.value.trim(),
+		});
+		closeStudySession();
+	} finally {
+		els.studySessionComplete.disabled = false;
 	}
 }
 
 els.logout.addEventListener("click", () => {
+	localStorage.removeItem(`${AUTH_TOKEN_KEY_PREFIX}student`);
+	localStorage.removeItem(`${AUTH_USER_KEY_PREFIX}student`);
 	localStorage.removeItem(AUTH_TOKEN_KEY);
 	localStorage.removeItem(AUTH_USER_KEY);
 	window.location.href = "./login.html";
@@ -393,11 +555,23 @@ els.planFilter.addEventListener("change", () => {
 	render();
 });
 
+els.navItems.forEach((item) => {
+	item.addEventListener("click", () => showPage(item.dataset.targetPage));
+});
+
 document.addEventListener("click", (event) => {
-	const button = event.target.closest("[data-save-entry]");
+	const button = event.target.closest("[data-start-study]");
 	if (!button) return;
 	const card = button.closest(".student-plan-card");
-	if (card) saveEntry(card);
+	if (card) startStudy(card);
+});
+
+els.studySessionComplete.addEventListener("click", () => {
+	completeStudy().catch(() => {});
+});
+
+els.studySessionCancel.addEventListener("click", () => {
+	closeStudySession();
 });
 
 loadStudentState();

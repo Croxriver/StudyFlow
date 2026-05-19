@@ -12,7 +12,17 @@ function toDateText(value) {
 
 function toTimeText(value) {
   if (!value) return "";
-  return String(value).slice(0, 5);
+  if (value instanceof Date) {
+    return `${String(value.getUTCHours()).padStart(2, "0")}:${String(value.getUTCMinutes()).padStart(2, "0")}`;
+  }
+
+  const match = String(value).match(/(\d{1,2}):(\d{2})/);
+  if (!match) return "";
+
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return "";
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 function toIsoText(value) {
@@ -71,6 +81,9 @@ function buildStudentState(recordsets) {
       rewardLabel: entry.rewardLabel || "포인트",
       rewardRedeemed: Boolean(entry.rewardRedeemed),
       rewardRedeemedAt: toIsoText(entry.rewardRedeemedAt),
+      studyStartedAt: toIsoText(entry.studyStartedAt),
+      studyDurationSeconds: Number(entry.studyDurationSeconds || 0),
+      studentFeedback: entry.studentFeedback || "",
       updatedAt: toIsoText(entry.updatedAt)
     };
   });
@@ -112,7 +125,16 @@ router.get("/state", requireAuth, requireStudent, async (request, response, next
 
 router.put("/entries", requireAuth, requireStudent, async (request, response, next) => {
   try {
-    const { subjectId, date, amount = "", memo = "", completed = false } = request.body || {};
+    const {
+      subjectId,
+      date,
+      amount = "",
+      memo = "",
+      completed = false,
+      studyStartedAt = "",
+      studyDurationSeconds = 0,
+      studentFeedback = ""
+    } = request.body || {};
 
     if (!subjectId || !date) {
       return response.status(400).json({
@@ -130,6 +152,9 @@ router.put("/entries", requireAuth, requireStudent, async (request, response, ne
       .input("amount", sql.NVarChar(200), String(amount || "").trim())
       .input("memo", sql.NVarChar(1000), String(memo || "").trim())
       .input("completed", sql.Bit, Boolean(completed))
+      .input("study_started_at", sql.DateTime2, studyStartedAt ? new Date(studyStartedAt) : null)
+      .input("study_duration_seconds", sql.Int, Math.max(0, Number.parseInt(studyDurationSeconds, 10) || 0))
+      .input("student_feedback", sql.NVarChar(1000), String(studentFeedback || "").trim())
       .execute("dbo.app_update_student_entry");
     const entry = result.recordset[0];
     const studyDate = toDateText(entry.studyDate);
@@ -147,6 +172,9 @@ router.put("/entries", requireAuth, requireStudent, async (request, response, ne
         rewardLabel: entry.rewardLabel || "포인트",
         rewardRedeemed: Boolean(entry.rewardRedeemed),
         rewardRedeemedAt: toIsoText(entry.rewardRedeemedAt),
+        studyStartedAt: toIsoText(entry.studyStartedAt),
+        studyDurationSeconds: Number(entry.studyDurationSeconds || 0),
+        studentFeedback: entry.studentFeedback || "",
         updatedAt: toIsoText(entry.updatedAt)
       }
     });

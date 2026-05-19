@@ -1,19 +1,18 @@
 ﻿const LEGACY_STORAGE_KEY = "local-study-manager-v1";
 const AUTH_TOKEN_KEY = "local-study-manager-token";
 const AUTH_USER_KEY = "local-study-manager-user";
+const AUTH_TOKEN_KEY_PREFIX = `${AUTH_TOKEN_KEY}:`;
+const AUTH_USER_KEY_PREFIX = `${AUTH_USER_KEY}:`;
 const MIGRATION_KEY_PREFIX = "local-study-manager-migration:";
-const authToken = localStorage.getItem(AUTH_TOKEN_KEY);
+const authSession = getSessionForRole("teacher");
+const authToken = authSession.token;
 
 if (!authToken) {
 	window.location.replace("./login.html");
 	throw new Error("Authentication required.");
 }
 
-const authUser = getAuthUser();
-if (authUser.role === "student") {
-	window.location.replace("./student.html");
-	throw new Error("Student mode uses the student page.");
-}
+const authUser = authSession.user;
 const STORAGE_KEY = getAccountStorageKey();
 const accountStateBeforeRemoteLoad = localStorage.getItem(STORAGE_KEY);
 const legacyStateBeforeRemoteLoad = localStorage.getItem(LEGACY_STORAGE_KEY);
@@ -58,7 +57,34 @@ let isForcingChildRegistration = false;
 
 function getAuthUser() {
 	try {
-		return JSON.parse(localStorage.getItem(AUTH_USER_KEY) || "{}");
+		return JSON.parse(localStorage.getItem(`${AUTH_USER_KEY_PREFIX}teacher`) || "{}");
+	} catch {
+		return {};
+	}
+}
+
+function getSessionForRole(role) {
+	const tokenKey = `${AUTH_TOKEN_KEY_PREFIX}${role}`;
+	const userKey = `${AUTH_USER_KEY_PREFIX}${role}`;
+	const token = localStorage.getItem(tokenKey);
+	const user = parseStoredUser(localStorage.getItem(userKey));
+
+	if (token && user.role === role) return { token, user };
+
+	const legacyToken = localStorage.getItem(AUTH_TOKEN_KEY);
+	const legacyUser = parseStoredUser(localStorage.getItem(AUTH_USER_KEY));
+	if (legacyToken && legacyUser.role === role) {
+		localStorage.setItem(tokenKey, legacyToken);
+		localStorage.setItem(userKey, JSON.stringify(legacyUser));
+		return { token: legacyToken, user: legacyUser };
+	}
+
+	return { token: "", user: {} };
+}
+
+function parseStoredUser(value) {
+	try {
+		return JSON.parse(value || "{}");
 	} catch {
 		return {};
 	}
@@ -584,6 +610,8 @@ function setSyncStatus(text, isError = false) {
 }
 
 function logout() {
+	localStorage.removeItem(`${AUTH_TOKEN_KEY_PREFIX}teacher`);
+	localStorage.removeItem(`${AUTH_USER_KEY_PREFIX}teacher`);
 	localStorage.removeItem(AUTH_TOKEN_KEY);
 	localStorage.removeItem(AUTH_USER_KEY);
 	window.location.href = "./login.html";
@@ -2099,7 +2127,8 @@ function addSubject(event) {
 	els.subjectForm.reset();
 	els.subjectChild.value = child;
 	els.subjectName.value = subjectSetting.id;
-	setTimeSelectValue(els.scheduleHour, els.scheduleMinute, "");
+	setSelectedScheduleDays("scheduleDay", scheduleDays);
+	setTimeSelectValue(els.scheduleHour, els.scheduleMinute, scheduleTime);
 	els.rewardLabel.value = rewardLabel;
 	els.subjectDialog.close();
 	saveState();

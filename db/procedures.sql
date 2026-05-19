@@ -34,6 +34,18 @@ IF COL_LENGTH('dbo.study_entries', 'updated_at') IS NULL
   ALTER TABLE dbo.study_entries ADD updated_at DATETIME2(0) NOT NULL CONSTRAINT DF_study_entries_updated_at DEFAULT SYSUTCDATETIME() WITH VALUES;
 GO
 
+IF COL_LENGTH('dbo.study_entries', 'study_started_at') IS NULL
+  ALTER TABLE dbo.study_entries ADD study_started_at DATETIME2(0) NULL;
+GO
+
+IF COL_LENGTH('dbo.study_entries', 'study_duration_seconds') IS NULL
+  ALTER TABLE dbo.study_entries ADD study_duration_seconds INT NOT NULL CONSTRAINT DF_study_entries_study_duration_seconds DEFAULT (0) WITH VALUES;
+GO
+
+IF COL_LENGTH('dbo.study_entries', 'student_feedback') IS NULL
+  ALTER TABLE dbo.study_entries ADD student_feedback NVARCHAR(1000) NULL;
+GO
+
 CREATE OR ALTER PROCEDURE dbo.app_create_user
   @email NVARCHAR(255),
   @password_hash NVARCHAR(255),
@@ -259,6 +271,9 @@ BEGIN
     se.reward_label AS rewardLabel,
     se.reward_redeemed AS rewardRedeemed,
     se.reward_redeemed_at AS rewardRedeemedAt,
+    se.study_started_at AS studyStartedAt,
+    se.study_duration_seconds AS studyDurationSeconds,
+    se.student_feedback AS studentFeedback,
     se.updated_at AS updatedAt
   FROM dbo.study_entries se
   INNER JOIN dbo.children c ON c.id = se.child_id
@@ -295,6 +310,9 @@ BEGIN
     reward_label NVARCHAR(50) NULL,
     reward_redeemed BIT NOT NULL,
     reward_redeemed_at DATETIME2(0) NULL,
+    study_started_at DATETIME2(0) NULL,
+    study_duration_seconds INT NOT NULL,
+    student_feedback NVARCHAR(1000) NULL,
     updated_at DATETIME2(0) NOT NULL
   );
 
@@ -304,7 +322,7 @@ BEGIN
   WHERE user_id = @user_id;
 
   INSERT INTO @existing_entries
-    (child_id, book_id, study_date, amount, memo, completed, reward_awarded, reward_amount, reward_label, reward_redeemed, reward_redeemed_at, updated_at)
+    (child_id, book_id, study_date, amount, memo, completed, reward_awarded, reward_amount, reward_label, reward_redeemed, reward_redeemed_at, study_started_at, study_duration_seconds, student_feedback, updated_at)
   SELECT
     child_id,
     book_id,
@@ -317,6 +335,9 @@ BEGIN
     reward_label,
     reward_redeemed,
     reward_redeemed_at,
+    study_started_at,
+    study_duration_seconds,
+    student_feedback,
     updated_at
   FROM dbo.study_entries
   WHERE user_id = @user_id;
@@ -456,7 +477,7 @@ BEGIN
   WHERE TRY_CONVERT(tinyint, dayValue.value) BETWEEN 0 AND 6;
 
   INSERT INTO dbo.study_entries
-    (user_id, child_id, book_id, study_date, amount, memo, completed, reward_awarded, reward_amount, reward_label, reward_redeemed, reward_redeemed_at, updated_at)
+    (user_id, child_id, book_id, study_date, amount, memo, completed, reward_awarded, reward_amount, reward_label, reward_redeemed, reward_redeemed_at, study_started_at, study_duration_seconds, student_feedback, updated_at)
   SELECT
     @user_id,
     book.child_id,
@@ -470,6 +491,9 @@ BEGIN
     CASE WHEN existing.updated_at > COALESCE(TRY_CONVERT(datetime2(0), NULLIF(entry.updatedAt, '')), '19000101') THEN existing.reward_label ELSE NULLIF(entry.rewardLabel, '') END,
     CASE WHEN existing.updated_at > COALESCE(TRY_CONVERT(datetime2(0), NULLIF(entry.updatedAt, '')), '19000101') THEN existing.reward_redeemed ELSE CASE WHEN entry.rewardRedeemed IN ('true', '1') THEN 1 ELSE 0 END END,
     CASE WHEN existing.updated_at > COALESCE(TRY_CONVERT(datetime2(0), NULLIF(entry.updatedAt, '')), '19000101') THEN existing.reward_redeemed_at ELSE TRY_CONVERT(datetime2(0), NULLIF(entry.rewardRedeemedAt, '')) END,
+    CASE WHEN existing.updated_at > COALESCE(TRY_CONVERT(datetime2(0), NULLIF(entry.updatedAt, '')), '19000101') THEN existing.study_started_at ELSE TRY_CONVERT(datetime2(0), NULLIF(entry.studyStartedAt, '')) END,
+    CASE WHEN existing.updated_at > COALESCE(TRY_CONVERT(datetime2(0), NULLIF(entry.updatedAt, '')), '19000101') THEN existing.study_duration_seconds ELSE CASE WHEN TRY_CONVERT(int, entry.studyDurationSeconds) > 0 THEN TRY_CONVERT(int, entry.studyDurationSeconds) ELSE 0 END END,
+    CASE WHEN existing.updated_at > COALESCE(TRY_CONVERT(datetime2(0), NULLIF(entry.updatedAt, '')), '19000101') THEN existing.student_feedback ELSE NULLIF(entry.studentFeedback, '') END,
     CASE WHEN existing.updated_at > COALESCE(TRY_CONVERT(datetime2(0), NULLIF(entry.updatedAt, '')), '19000101') THEN existing.updated_at ELSE COALESCE(TRY_CONVERT(datetime2(0), NULLIF(entry.updatedAt, '')), SYSUTCDATETIME()) END
   FROM OPENJSON(@state_json, '$.entriesList')
   WITH (
@@ -483,6 +507,9 @@ BEGIN
     rewardLabel NVARCHAR(50) '$.rewardLabel',
     rewardRedeemed NVARCHAR(5) '$.rewardRedeemed',
     rewardRedeemedAt NVARCHAR(40) '$.rewardRedeemedAt',
+    studyStartedAt NVARCHAR(40) '$.studyStartedAt',
+    studyDurationSeconds NVARCHAR(20) '$.studyDurationSeconds',
+    studentFeedback NVARCHAR(1000) '$.studentFeedback',
     updatedAt NVARCHAR(40) '$.updatedAt'
   ) entry
   INNER JOIN @books book ON book.id = entry.bookId
@@ -493,7 +520,7 @@ BEGIN
   WHERE entry.bookId IS NOT NULL AND TRY_CONVERT(date, entry.studyDate) IS NOT NULL;
 
   INSERT INTO dbo.study_entries
-    (user_id, child_id, book_id, study_date, amount, memo, completed, reward_awarded, reward_amount, reward_label, reward_redeemed, reward_redeemed_at, updated_at)
+    (user_id, child_id, book_id, study_date, amount, memo, completed, reward_awarded, reward_amount, reward_label, reward_redeemed, reward_redeemed_at, study_started_at, study_duration_seconds, student_feedback, updated_at)
   SELECT
     @user_id,
     existing.child_id,
@@ -507,6 +534,9 @@ BEGIN
     existing.reward_label,
     existing.reward_redeemed,
     existing.reward_redeemed_at,
+    existing.study_started_at,
+    existing.study_duration_seconds,
+    existing.student_feedback,
     existing.updated_at
   FROM @existing_entries existing
   INNER JOIN @books book ON book.id = existing.book_id AND book.child_id = existing.child_id
@@ -580,6 +610,9 @@ BEGIN
     se.reward_label AS rewardLabel,
     se.reward_redeemed AS rewardRedeemed,
     se.reward_redeemed_at AS rewardRedeemedAt,
+    se.study_started_at AS studyStartedAt,
+    se.study_duration_seconds AS studyDurationSeconds,
+    se.student_feedback AS studentFeedback,
     se.updated_at AS updatedAt
   FROM dbo.study_entries se
   WHERE se.user_id = @teacher_user_id AND se.child_id = @child_id
@@ -594,7 +627,10 @@ CREATE OR ALTER PROCEDURE dbo.app_update_student_entry
   @study_date DATE,
   @amount NVARCHAR(200) = NULL,
   @memo NVARCHAR(1000) = NULL,
-  @completed BIT = 0
+  @completed BIT = 0,
+  @study_started_at DATETIME2(0) = NULL,
+  @study_duration_seconds INT = 0,
+  @student_feedback NVARCHAR(1000) = NULL
 AS
 BEGIN
   SET NOCOUNT ON;
@@ -677,14 +713,17 @@ BEGIN
       reward_awarded = @next_reward_awarded,
       reward_amount = @next_reward_amount,
       reward_label = @next_reward_label,
-    reward_redeemed = @next_reward_redeemed,
+      reward_redeemed = @next_reward_redeemed,
       reward_redeemed_at = @next_reward_redeemed_at,
+      study_started_at = @study_started_at,
+      study_duration_seconds = CASE WHEN @study_duration_seconds > 0 THEN @study_duration_seconds ELSE 0 END,
+      student_feedback = NULLIF(@student_feedback, ''),
       updated_at = SYSUTCDATETIME()
   WHEN NOT MATCHED THEN
     INSERT
-      (user_id, child_id, book_id, study_date, amount, memo, completed, reward_awarded, reward_amount, reward_label, reward_redeemed, reward_redeemed_at, updated_at)
+      (user_id, child_id, book_id, study_date, amount, memo, completed, reward_awarded, reward_amount, reward_label, reward_redeemed, reward_redeemed_at, study_started_at, study_duration_seconds, student_feedback, updated_at)
     VALUES
-      (@teacher_user_id, @child_id, @book_id, @study_date, NULLIF(@amount, ''), NULLIF(@memo, ''), @completed, @next_reward_awarded, @next_reward_amount, @next_reward_label, @next_reward_redeemed, @next_reward_redeemed_at, SYSUTCDATETIME());
+      (@teacher_user_id, @child_id, @book_id, @study_date, NULLIF(@amount, ''), NULLIF(@memo, ''), @completed, @next_reward_awarded, @next_reward_amount, @next_reward_label, @next_reward_redeemed, @next_reward_redeemed_at, @study_started_at, CASE WHEN @study_duration_seconds > 0 THEN @study_duration_seconds ELSE 0 END, NULLIF(@student_feedback, ''), SYSUTCDATETIME());
 
   SELECT
     book_id AS bookId,
@@ -697,6 +736,9 @@ BEGIN
     reward_label AS rewardLabel,
     reward_redeemed AS rewardRedeemed,
     reward_redeemed_at AS rewardRedeemedAt,
+    study_started_at AS studyStartedAt,
+    study_duration_seconds AS studyDurationSeconds,
+    student_feedback AS studentFeedback,
     updated_at AS updatedAt
   FROM dbo.study_entries
   WHERE user_id = @teacher_user_id AND child_id = @child_id AND book_id = @book_id AND study_date = @study_date;
@@ -716,6 +758,9 @@ CREATE OR ALTER PROCEDURE dbo.app_update_teacher_entry
   @reward_label NVARCHAR(50) = NULL,
   @reward_redeemed BIT = 0,
   @reward_redeemed_at DATETIME2(0) = NULL,
+  @study_started_at DATETIME2(0) = NULL,
+  @study_duration_seconds INT = 0,
+  @student_feedback NVARCHAR(1000) = NULL,
   @updated_at DATETIME2(0) = NULL
 AS
 BEGIN
@@ -759,12 +804,15 @@ BEGIN
       reward_label = NULLIF(@reward_label, ''),
       reward_redeemed = @reward_redeemed,
       reward_redeemed_at = @reward_redeemed_at,
+      study_started_at = @study_started_at,
+      study_duration_seconds = CASE WHEN @study_duration_seconds > 0 THEN @study_duration_seconds ELSE 0 END,
+      student_feedback = NULLIF(@student_feedback, ''),
       updated_at = COALESCE(@updated_at, SYSUTCDATETIME())
   WHEN NOT MATCHED THEN
     INSERT
-      (user_id, child_id, book_id, study_date, amount, memo, completed, reward_awarded, reward_amount, reward_label, reward_redeemed, reward_redeemed_at, updated_at)
+      (user_id, child_id, book_id, study_date, amount, memo, completed, reward_awarded, reward_amount, reward_label, reward_redeemed, reward_redeemed_at, study_started_at, study_duration_seconds, student_feedback, updated_at)
     VALUES
-      (@user_id, @child_id, @book_id, @study_date, NULLIF(@amount, ''), NULLIF(@memo, ''), @completed, @reward_awarded, CASE WHEN @reward_amount > 0 THEN @reward_amount ELSE 0 END, NULLIF(@reward_label, ''), @reward_redeemed, @reward_redeemed_at, COALESCE(@updated_at, SYSUTCDATETIME()));
+      (@user_id, @child_id, @book_id, @study_date, NULLIF(@amount, ''), NULLIF(@memo, ''), @completed, @reward_awarded, CASE WHEN @reward_amount > 0 THEN @reward_amount ELSE 0 END, NULLIF(@reward_label, ''), @reward_redeemed, @reward_redeemed_at, @study_started_at, CASE WHEN @study_duration_seconds > 0 THEN @study_duration_seconds ELSE 0 END, NULLIF(@student_feedback, ''), COALESCE(@updated_at, SYSUTCDATETIME()));
 
   SELECT
     c.name AS childName,
@@ -778,6 +826,9 @@ BEGIN
     se.reward_label AS rewardLabel,
     se.reward_redeemed AS rewardRedeemed,
     se.reward_redeemed_at AS rewardRedeemedAt,
+    se.study_started_at AS studyStartedAt,
+    se.study_duration_seconds AS studyDurationSeconds,
+    se.student_feedback AS studentFeedback,
     se.updated_at AS updatedAt
   FROM dbo.study_entries se
   INNER JOIN dbo.children c ON c.id = se.child_id

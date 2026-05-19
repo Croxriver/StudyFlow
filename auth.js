@@ -1,5 +1,7 @@
 ﻿const AUTH_TOKEN_KEY = "local-study-manager-token";
 const AUTH_USER_KEY = "local-study-manager-user";
+const AUTH_TOKEN_KEY_PREFIX = `${AUTH_TOKEN_KEY}:`;
+const AUTH_USER_KEY_PREFIX = `${AUTH_USER_KEY}:`;
 
 const form = document.querySelector("[data-auth-form]");
 const message = document.querySelector("[data-auth-message]");
@@ -57,8 +59,29 @@ function saveSession(data) {
 	if (!data?.token || !data?.user?.role) {
 		throw new Error("로그인 응답이 올바르지 않습니다. 서버 API 연결을 확인하세요.");
 	}
-	localStorage.setItem(AUTH_TOKEN_KEY, data.token);
-	localStorage.setItem(AUTH_USER_KEY, JSON.stringify(data.user));
+	migrateLegacySession();
+	const role = data.user.role;
+	localStorage.setItem(`${AUTH_TOKEN_KEY_PREFIX}${role}`, data.token);
+	localStorage.setItem(`${AUTH_USER_KEY_PREFIX}${role}`, JSON.stringify(data.user));
+	localStorage.removeItem(AUTH_TOKEN_KEY);
+	localStorage.removeItem(AUTH_USER_KEY);
+}
+
+function migrateLegacySession() {
+	const token = localStorage.getItem(AUTH_TOKEN_KEY);
+	const user = parseStoredUser(localStorage.getItem(AUTH_USER_KEY));
+	if (!token || !user.role) return;
+
+	localStorage.setItem(`${AUTH_TOKEN_KEY_PREFIX}${user.role}`, token);
+	localStorage.setItem(`${AUTH_USER_KEY_PREFIX}${user.role}`, JSON.stringify(user));
+}
+
+function parseStoredUser(value) {
+	try {
+		return JSON.parse(value || "{}");
+	} catch {
+		return {};
+	}
 }
 
 function getLoginMode() {
