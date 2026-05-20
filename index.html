@@ -149,6 +149,58 @@
 					</section>
 				</section>
 
+				<section class="page-view" id="settingsPage" data-page="settings">
+					<section class="mypage-section" aria-label="환경설정">
+						<div class="section-heading">
+							<div>
+								<h2>환경설정</h2>
+								<p>앱 표시 방식과 사용 환경을 설정하세요.</p>
+							</div>
+						</div>
+						<div class="subpage-actions">
+							<button class="ghost subpage-back" type="button" data-target-page="mypage">‹ 마이페이지</button>
+						</div>
+						<div class="mypage-content settings-content">
+							<div class="profile-panel settings-panel">
+								<div>
+									<p class="eyebrow">Appearance</p>
+									<h3>화면 테마</h3>
+									<p>스터디플로우를 라이트 모드 또는 다크 모드로 사용할 수 있습니다.</p>
+								</div>
+								<label class="theme-switch icon-theme-switch settings-theme-switch" title="라이트/다크 모드 전환" aria-label="라이트/다크 모드 전환">
+									<input type="checkbox" data-theme-toggle aria-label="다크 모드" />
+									<span class="theme-switch-track" aria-hidden="true">
+										<svg class="theme-switch-icon theme-switch-sun" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+											<circle cx="12" cy="12" r="4"></circle>
+											<path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19"></path>
+										</svg>
+										<svg class="theme-switch-icon theme-switch-moon" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+											<path d="M20 15.2A7.6 7.6 0 0 1 8.8 4a8 8 0 1 0 11.2 11.2Z"></path>
+										</svg>
+									</span>
+								</label>
+							</div>
+							<div class="profile-panel settings-panel settings-choice-panel">
+								<div>
+									<p class="eyebrow">Week Start</p>
+									<h3>시작 날짜</h3>
+									<p>주간 학습 화면에 표시할 7일 범위의 시작일을 선택하세요.</p>
+								</div>
+								<div class="settings-option-list" role="radiogroup" aria-label="시작 날짜">
+									<label class="settings-option">
+										<input type="radio" name="weekStartMode" value="monday" data-week-start-mode checked />
+										<span>월요일부터</span>
+									</label>
+									<label class="settings-option">
+										<input type="radio" name="weekStartMode" value="today" data-week-start-mode />
+										<span>오늘부터</span>
+									</label>
+								</div>
+							</div>
+						</div>
+					</section>
+				</section>
+
 				<section class="page-view" id="rewardHistoryPage" data-page="reward-history">
 					<section class="reward-history-section" aria-label="보상 지급 이력">
 						<div class="section-heading">

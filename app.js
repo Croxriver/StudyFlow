@@ -17,6 +17,10 @@ const STORAGE_KEY = getAccountStorageKey();
 const PAGE_STORAGE_KEY = "studyflow-teacher-active-page";
 const accountStateBeforeRemoteLoad = localStorage.getItem(STORAGE_KEY);
 const legacyStateBeforeRemoteLoad = localStorage.getItem(LEGACY_STORAGE_KEY);
+const DEFAULT_USER_SETTINGS = {
+	weekStartMode: "monday",
+};
+const WEEK_START_MODES = new Set(["monday", "today"]);
 
 const DEFAULT_CHILDREN = ["재민", "지원", "정빈"];
 const DEFAULT_SUBJECT_SETTINGS = [
@@ -41,7 +45,7 @@ const scheduleDayIndexes = new Map([
 
 let state = loadState();
 let children = getChildNamesFromState();
-let weekStart = startOfWeek(new Date());
+let weekStart = getDefaultWeekStart();
 let activeEntry = null;
 let activeCopy = null;
 let activeBookEdit = null;
@@ -141,6 +145,8 @@ const els = {
 	mypageContent: document.querySelector("#mypageContent"),
 	subjectsContent: document.querySelector("#subjectsContent"),
 	subjectsSection: document.querySelector("#subjectsPage .mypage-section"),
+	settingsSection: document.querySelector("#settingsPage .mypage-section"),
+	weekStartModeInputs: document.querySelectorAll("[data-week-start-mode]"),
 	entryDialog: document.querySelector("#entryDialog"),
 	entryForm: document.querySelector("#entryForm"),
 	entryMeta: document.querySelector("#entryMeta"),
@@ -233,12 +239,14 @@ function createDefaultState() {
 		childAccounts: [],
 		subjectsByChild: {},
 		subjectSettings: [],
+		userSettings: { ...DEFAULT_USER_SETTINGS },
 		entries: {},
 	};
 }
 
 function normalizeState(value) {
 	const profile = normalizeProfile(value.profile);
+	const userSettings = normalizeUserSettings(value.userSettings);
 	const entries = value.entries && typeof value.entries === "object" ? value.entries : {};
 	const childAccounts = normalizeChildAccounts(value);
 	const childNames = childAccounts.map((account) => account.name);
@@ -257,7 +265,16 @@ function normalizeState(value) {
 	const subjectSettings = normalizeSubjectSettings(value.subjectSettings, subjectsByChild);
 	assignSubjectSettingsToBooks(subjectsByChild, subjectSettings);
 
-	return { profile, childAccounts, subjectsByChild, subjectSettings, entries };
+	return { profile, childAccounts, subjectsByChild, subjectSettings, userSettings, entries };
+}
+
+function normalizeUserSettings(settings = {}) {
+	const weekStartMode = WEEK_START_MODES.has(settings?.weekStartMode) ? settings.weekStartMode : DEFAULT_USER_SETTINGS.weekStartMode;
+	return {
+		...DEFAULT_USER_SETTINGS,
+		...settings,
+		weekStartMode,
+	};
 }
 
 function normalizeProfile(profile) {
@@ -387,6 +404,7 @@ function openBookMenu(menuButton) {
 function getStateForSync() {
 	return {
 		...state,
+		userSettings: normalizeUserSettings(state.userSettings),
 		subjectsByChild: Object.fromEntries(
 			Object.entries(state.subjectsByChild || {}).map(([child, subjects]) => [
 				child,
@@ -555,6 +573,7 @@ async function loadRemoteState() {
 		isHydratingRemoteState = true;
 		state = normalizeState(data.state);
 		children = getChildNamesFromState();
+		weekStart = getDefaultWeekStart();
 		localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 		render();
 		promptForRequiredChildRegistration();
@@ -664,6 +683,16 @@ function startOfWeek(date) {
 	return copy;
 }
 
+function startOfToday(date = new Date()) {
+	const copy = new Date(date);
+	copy.setHours(0, 0, 0, 0);
+	return copy;
+}
+
+function getDefaultWeekStart(date = new Date()) {
+	return normalizeUserSettings(state?.userSettings).weekStartMode === "today" ? startOfToday(date) : startOfWeek(date);
+}
+
 function addDays(date, days) {
 	const copy = new Date(date);
 	copy.setDate(copy.getDate() + days);
@@ -755,6 +784,7 @@ function render() {
 	renderRewardHistory();
 	renderMyPage();
 	renderSubjectsPage();
+	renderSettingsPage();
 }
 
 function renderProfile() {
@@ -781,7 +811,7 @@ function showPage(page) {
 	if (els.topbarThemeSlot) {
 		els.topbarThemeSlot.hidden = nextPage !== "mypage";
 	}
-	const navPage = nextPage === "subjects" ? "mypage" : nextPage;
+	const navPage = ["subjects", "settings"].includes(nextPage) ? "mypage" : nextPage;
 	els.navItems.forEach((item) => {
 		item.classList.toggle("active", item.dataset.targetPage === navPage);
 	});
@@ -1448,6 +1478,13 @@ function renderMyPage() {
         </div>
         <span class="mypage-entry-arrow">›</span>
       </button>
+      <button class="mypage-entry-card" type="button" data-target-page="settings">
+        <div class="mypage-entry-info">
+          <strong>환경설정</strong>
+          <p>화면 테마와 앱 사용 환경 설정</p>
+        </div>
+        <span class="mypage-entry-arrow">›</span>
+      </button>
     </div>
   `;
 
@@ -1516,6 +1553,44 @@ async function togglePushSubscription() {
 	}
 }
 
+async function saveUserSetting(key, value) {
+	state.userSettings = normalizeUserSettings({
+		...state.userSettings,
+		[key]: value,
+	});
+	localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+
+	try {
+		setSyncStatus("설정 저장 중");
+		const response = await fetch("/api/state/settings", {
+			method: "PUT",
+			headers: {
+				Authorization: `Bearer ${authToken}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ key, value }),
+		});
+		if (!isJsonResponse(response)) throw new Error("StudyFlow API 응답이 아닙니다.");
+
+		if (response.status === 401) {
+			logout();
+			return false;
+		}
+
+		if (!response.ok) {
+			setSyncStatus("설정 저장 실패", true);
+			return false;
+		}
+
+		setSyncStatus("설정 저장됨");
+		return true;
+	} catch (error) {
+		setSyncStatus("설정 저장 실패", true);
+		console.warn("Failed to save user setting.", error);
+		return false;
+	}
+}
+
 function registerNativePushIfAvailable() {
 	window.StudyFlowPush?.registerNativeAppToken(authToken).catch((error) => {
 		console.warn("Failed to register native push token.", error);
@@ -1528,6 +1603,25 @@ function renderSubjectsPage() {
       ${state.subjectSettings.map(renderSubjectSettingItem).join("")}
     </div>
   `;
+}
+
+function renderSettingsPage() {
+	const userSettings = normalizeUserSettings(state.userSettings);
+	els.weekStartModeInputs.forEach((input) => {
+		input.checked = input.value === userSettings.weekStartMode;
+	});
+}
+
+function updateWeekStartMode(mode) {
+	const previousMode = normalizeUserSettings(state.userSettings).weekStartMode;
+	saveUserSetting("weekStartMode", mode);
+	if (previousMode === mode) return;
+	weekStart = getDefaultWeekStart();
+	renderWeekRange();
+	renderSummary();
+	renderTable();
+	renderPendingPlans();
+	renderStats();
 }
 
 function renderSubjectSettingItem(subject, index) {
@@ -2814,7 +2908,7 @@ els.nextWeek.addEventListener("click", () => {
 });
 
 els.todayBtn.addEventListener("click", () => {
-	weekStart = startOfWeek(new Date());
+	weekStart = getDefaultWeekStart();
 	render();
 });
 
@@ -2826,7 +2920,7 @@ els.statsContent.addEventListener("click", (event) => {
 		return;
 	}
 	if (event.target.closest("[data-stats-today]")) {
-		weekStart = startOfWeek(new Date());
+		weekStart = getDefaultWeekStart();
 		render();
 	}
 });
@@ -2896,6 +2990,17 @@ function handleSubjectClick(event) {
 }
 
 els.subjectsSection.addEventListener("click", handleSubjectClick);
+
+els.settingsSection.addEventListener("click", (event) => {
+	const backButton = event.target.closest("[data-target-page]");
+	if (backButton) showPage(backButton.dataset.targetPage);
+});
+
+els.settingsSection.addEventListener("change", (event) => {
+	const weekStartModeInput = event.target.closest("[data-week-start-mode]");
+	if (!weekStartModeInput || !weekStartModeInput.checked) return;
+	updateWeekStartMode(weekStartModeInput.value);
+});
 
 els.subjectsContent.addEventListener("dragstart", (event) => {
 	const item = event.target.closest(".subject-setting-item");

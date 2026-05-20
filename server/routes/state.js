@@ -8,6 +8,10 @@ const router = express.Router();
 const dayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 const dayNumbers = new Map(dayLabels.map((label, index) => [label, index]));
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const settingKeyPattern = /^[A-Za-z][A-Za-z0-9_.-]{0,99}$/;
+const defaultUserSettings = {
+  weekStartMode: "monday"
+};
 
 function ensureUuid(value) {
   const text = String(value || "");
@@ -46,7 +50,7 @@ function entryKey(child, subjectId, date) {
 }
 
 function buildStateFromRecordsets(recordsets) {
-  const [profiles = [], childrenRows = [], settingRows = [], bookRows = [], dayRows = [], entryRows = []] = recordsets;
+  const [profiles = [], childrenRows = [], settingRows = [], bookRows = [], dayRows = [], entryRows = [], userSettingRows = []] = recordsets;
   const profile = profiles[0];
 
   if (!profile) return null;
@@ -109,6 +113,12 @@ function buildStateFromRecordsets(recordsets) {
     };
   });
 
+  const userSettings = {
+    ...defaultUserSettings,
+    ...Object.fromEntries(userSettingRows.map((setting) => [setting.settingKey, setting.settingValue || ""]))
+  };
+  if (!["monday", "today"].includes(userSettings.weekStartMode)) userSettings.weekStartMode = defaultUserSettings.weekStartMode;
+
   return {
     profile: {
       name: profile.name,
@@ -124,8 +134,24 @@ function buildStateFromRecordsets(recordsets) {
       name: subject.name,
       color: subject.color
     })),
+    userSettings,
     entries
   };
+}
+
+function normalizeUserSettings(settings = {}) {
+  const normalized = {};
+  Object.entries(settings || {}).forEach(([key, value]) => {
+    const settingKey = String(key || "").trim();
+    if (!settingKeyPattern.test(settingKey)) return;
+    normalized[settingKey] = String(value ?? "").slice(0, 1000);
+  });
+
+  if (!["monday", "today"].includes(normalized.weekStartMode)) {
+    normalized.weekStartMode = defaultUserSettings.weekStartMode;
+  }
+
+  return normalized;
 }
 
 async function normalizeStateForProcedure(state) {
@@ -211,6 +237,7 @@ async function normalizeStateForProcedure(state) {
     profile: state.profile || {},
     childAccounts: children,
     subjectSettings,
+    userSettings: normalizeUserSettings(state.userSettings),
     books,
     entriesList
   };
@@ -262,6 +289,46 @@ router.put("/", requireAuth, requireTeacher, async (request, response, next) => 
     response.json({
       ok: Boolean(saved.ok),
       persistence: saved.persistence || "database"
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.put("/settings", requireAuth, requireTeacher, async (request, response, next) => {
+  const settingKey = String(request.body?.key || "").trim();
+  const settingValue = String(request.body?.value ?? "").trim();
+
+  if (!settingKeyPattern.test(settingKey)) {
+    return response.status(400).json({
+      error: "invalid_setting_key",
+      message: "A valid setting key is required."
+    });
+  }
+
+  if (settingKey === "weekStartMode" && !["monday", "today"].includes(settingValue)) {
+    return response.status(400).json({
+      error: "invalid_setting_value",
+      message: "Week start mode must be monday or today."
+    });
+  }
+
+  try {
+    const pool = await getPool();
+    const result = await pool.request()
+      .input("user_id", sql.UniqueIdentifier, request.user.sub)
+      .input("setting_key", sql.NVarChar(100), settingKey)
+      .input("setting_value", sql.NVarChar(1000), settingValue.slice(0, 1000))
+      .execute("dbo.app_save_user_setting");
+    const setting = result.recordset[0];
+
+    response.json({
+      setting: {
+        key: setting.settingKey,
+        value: setting.settingValue || "",
+        updatedAt: setting.updatedAt ? new Date(setting.updatedAt).toISOString() : ""
+      },
+      persistence: "database"
     });
   } catch (error) {
     next(error);

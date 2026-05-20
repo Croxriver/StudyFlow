@@ -1,3 +1,17 @@
+IF OBJECT_ID('dbo.user_settings', 'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.user_settings (
+    user_id UNIQUEIDENTIFIER NOT NULL,
+    setting_key NVARCHAR(100) NOT NULL,
+    setting_value NVARCHAR(1000) NULL,
+    created_at DATETIME2(0) NOT NULL CONSTRAINT DF_user_settings_created_at DEFAULT SYSUTCDATETIME(),
+    updated_at DATETIME2(0) NOT NULL CONSTRAINT DF_user_settings_updated_at DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_user_settings PRIMARY KEY (user_id, setting_key),
+    CONSTRAINT FK_user_settings_users FOREIGN KEY (user_id) REFERENCES dbo.users(id) ON DELETE CASCADE
+  );
+END;
+GO
+
 IF OBJECT_ID('dbo.push_subscriptions', 'U') IS NULL
 BEGIN
   CREATE TABLE dbo.push_subscriptions (

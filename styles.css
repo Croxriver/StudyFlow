@@ -2164,6 +2164,66 @@ td:has(.entry-cell) {
 	align-content: start;
 }
 
+.settings-panel {
+	align-items: center;
+}
+
+.settings-theme-switch {
+	flex: 0 0 auto;
+}
+
+.settings-choice-panel {
+	align-items: flex-start;
+}
+
+.settings-option-list {
+	background: var(--subtle);
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	display: flex;
+	flex: 0 0 auto;
+	flex-wrap: wrap;
+	gap: 4px;
+	justify-content: flex-end;
+	padding: 4px;
+}
+
+.settings-option {
+	align-items: center;
+	border-radius: 9px;
+	color: var(--muted-strong);
+	cursor: pointer;
+	display: inline-flex;
+	font-size: 13px;
+	font-weight: 700;
+	min-height: 34px;
+	padding: 0 14px;
+	padding-top: 3px;
+	transition:
+		background 0.15s,
+		box-shadow 0.15s,
+		color 0.15s;
+}
+
+.settings-option:has(input:checked) {
+	background: var(--panel);
+	box-shadow: var(--shadow-soft);
+	color: var(--ink);
+}
+
+.settings-option input {
+	height: 1px;
+	opacity: 0;
+	pointer-events: none;
+	position: absolute;
+	width: 1px;
+}
+
+.settings-option:focus-within {
+	outline: 2px solid var(--focus);
+	outline-offset: 2px;
+}
+
 .mypage-content .profile-panel:has(.profile-panel-actions) {
 	align-items: stretch;
 	display: grid;

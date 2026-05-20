@@ -1,3 +1,17 @@
+IF OBJECT_ID('dbo.user_settings', 'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.user_settings (
+    user_id UNIQUEIDENTIFIER NOT NULL,
+    setting_key NVARCHAR(100) NOT NULL,
+    setting_value NVARCHAR(1000) NULL,
+    created_at DATETIME2(0) NOT NULL CONSTRAINT DF_user_settings_created_at DEFAULT SYSUTCDATETIME(),
+    updated_at DATETIME2(0) NOT NULL CONSTRAINT DF_user_settings_updated_at DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_user_settings PRIMARY KEY (user_id, setting_key),
+    CONSTRAINT FK_user_settings_users FOREIGN KEY (user_id) REFERENCES dbo.users(id) ON DELETE CASCADE
+  );
+END;
+GO
+
 IF COL_LENGTH('dbo.books', 'reward_enabled') IS NULL
   ALTER TABLE dbo.books ADD reward_enabled BIT NOT NULL CONSTRAINT DF_books_reward_enabled DEFAULT (0) WITH VALUES;
 GO
@@ -606,6 +620,13 @@ BEGIN
   INNER JOIN dbo.children c ON c.id = se.child_id
   WHERE se.user_id = @user_id
   ORDER BY se.study_date;
+
+  SELECT
+    setting_key AS settingKey,
+    setting_value AS settingValue
+  FROM dbo.user_settings
+  WHERE user_id = @user_id
+  ORDER BY setting_key;
 END;
 GO
 
@@ -679,6 +700,24 @@ BEGIN
     END,
     updated_at = SYSUTCDATETIME()
   WHERE id = @user_id;
+
+  MERGE dbo.user_settings AS target
+  USING (
+    SELECT
+      @user_id AS user_id,
+      LEFT([key] COLLATE DATABASE_DEFAULT, 100) AS setting_key,
+      LEFT(CONVERT(NVARCHAR(1000), value), 1000) AS setting_value
+    FROM OPENJSON(@state_json, '$.userSettings')
+    WHERE [key] IS NOT NULL AND LEN([key]) BETWEEN 1 AND 100
+  ) AS source
+  ON target.user_id = source.user_id AND target.setting_key = source.setting_key
+  WHEN MATCHED THEN
+    UPDATE SET
+      setting_value = source.setting_value,
+      updated_at = SYSUTCDATETIME()
+  WHEN NOT MATCHED THEN
+    INSERT (user_id, setting_key, setting_value)
+    VALUES (source.user_id, source.setting_key, source.setting_value);
 
   DELETE FROM dbo.study_entries WHERE user_id = @user_id;
 
@@ -881,6 +920,39 @@ BEGIN
   COMMIT TRANSACTION;
 
   SELECT CAST(1 AS BIT) AS ok, N'database' AS persistence;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.app_save_user_setting
+  @user_id UNIQUEIDENTIFIER,
+  @setting_key NVARCHAR(100),
+  @setting_value NVARCHAR(1000) = NULL
+AS
+BEGIN
+  SET NOCOUNT ON;
+
+  MERGE dbo.user_settings AS target
+  USING (
+    SELECT
+      @user_id AS user_id,
+      @setting_key AS setting_key,
+      @setting_value AS setting_value
+  ) AS source
+  ON target.user_id = source.user_id AND target.setting_key = source.setting_key
+  WHEN MATCHED THEN
+    UPDATE SET
+      setting_value = source.setting_value,
+      updated_at = SYSUTCDATETIME()
+  WHEN NOT MATCHED THEN
+    INSERT (user_id, setting_key, setting_value)
+    VALUES (source.user_id, source.setting_key, source.setting_value);
+
+  SELECT
+    setting_key AS settingKey,
+    setting_value AS settingValue,
+    updated_at AS updatedAt
+  FROM dbo.user_settings
+  WHERE user_id = @user_id AND setting_key = @setting_key;
 END;
 GO
 
