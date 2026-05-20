@@ -14,13 +14,16 @@ if (!authToken) {
 
 const authUser = authSession.user;
 const STORAGE_KEY = getAccountStorageKey();
-const PAGE_STORAGE_KEY = "studyflow-teacher-active-page";
+const LEGACY_PAGE_STORAGE_KEY = "studyflow-teacher-active-page";
+const PAGE_STORAGE_KEY = `studyflow-teacher-active-page:${authUser.id || authUser.email || "anonymous"}`;
 const accountStateBeforeRemoteLoad = localStorage.getItem(STORAGE_KEY);
 const legacyStateBeforeRemoteLoad = localStorage.getItem(LEGACY_STORAGE_KEY);
 const DEFAULT_USER_SETTINGS = {
 	weekStartMode: "monday",
+	startupScreenMode: "weekly",
 };
 const WEEK_START_MODES = new Set(["monday", "today"]);
+const STARTUP_SCREEN_MODES = new Set(["weekly", "last"]);
 
 const DEFAULT_CHILDREN = ["재민", "지원", "정빈"];
 const DEFAULT_SUBJECT_SETTINGS = [
@@ -147,6 +150,7 @@ const els = {
 	subjectsSection: document.querySelector("#subjectsPage .mypage-section"),
 	settingsSection: document.querySelector("#settingsPage .mypage-section"),
 	weekStartModeInputs: document.querySelectorAll("[data-week-start-mode]"),
+	startupScreenModeInputs: document.querySelectorAll("[data-startup-screen-mode]"),
 	entryDialog: document.querySelector("#entryDialog"),
 	entryForm: document.querySelector("#entryForm"),
 	entryMeta: document.querySelector("#entryMeta"),
@@ -270,10 +274,12 @@ function normalizeState(value) {
 
 function normalizeUserSettings(settings = {}) {
 	const weekStartMode = WEEK_START_MODES.has(settings?.weekStartMode) ? settings.weekStartMode : DEFAULT_USER_SETTINGS.weekStartMode;
+	const startupScreenMode = STARTUP_SCREEN_MODES.has(settings?.startupScreenMode) ? settings.startupScreenMode : DEFAULT_USER_SETTINGS.startupScreenMode;
 	return {
 		...DEFAULT_USER_SETTINGS,
 		...settings,
 		weekStartMode,
+		startupScreenMode,
 	};
 }
 
@@ -576,6 +582,7 @@ async function loadRemoteState() {
 		weekStart = getDefaultWeekStart();
 		localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 		render();
+		showPage(getStartupPage());
 		promptForRequiredChildRegistration();
 		setSyncStatus("서버 데이터 불러옴");
 	} catch (error) {
@@ -795,11 +802,20 @@ function renderProfile() {
 
 function getSavedPage(defaultPage = "weekly") {
 	try {
-		const savedPage = sessionStorage.getItem(PAGE_STORAGE_KEY);
+		const savedPage = localStorage.getItem(PAGE_STORAGE_KEY) || sessionStorage.getItem(LEGACY_PAGE_STORAGE_KEY);
 		return Array.from(els.pageViews).some((view) => view.dataset.page === savedPage) ? savedPage : defaultPage;
 	} catch {
 		return defaultPage;
 	}
+}
+
+function getStartupPage() {
+	const userSettings = normalizeUserSettings(state.userSettings);
+	return userSettings.startupScreenMode === "last" ? getSavedPage("weekly") : "weekly";
+}
+
+function getStorablePage(page) {
+	return ["subjects", "settings"].includes(page) ? "mypage" : page;
 }
 
 function showPage(page) {
@@ -816,7 +832,7 @@ function showPage(page) {
 		item.classList.toggle("active", item.dataset.targetPage === navPage);
 	});
 	try {
-		sessionStorage.setItem(PAGE_STORAGE_KEY, nextPage);
+		localStorage.setItem(PAGE_STORAGE_KEY, getStorablePage(nextPage));
 	} catch {}
 }
 
@@ -1610,6 +1626,9 @@ function renderSettingsPage() {
 	els.weekStartModeInputs.forEach((input) => {
 		input.checked = input.value === userSettings.weekStartMode;
 	});
+	els.startupScreenModeInputs.forEach((input) => {
+		input.checked = input.value === userSettings.startupScreenMode;
+	});
 }
 
 function updateWeekStartMode(mode) {
@@ -1622,6 +1641,10 @@ function updateWeekStartMode(mode) {
 	renderTable();
 	renderPendingPlans();
 	renderStats();
+}
+
+function updateStartupScreenMode(mode) {
+	saveUserSetting("startupScreenMode", mode);
 }
 
 function renderSubjectSettingItem(subject, index) {
@@ -2998,8 +3021,13 @@ els.settingsSection.addEventListener("click", (event) => {
 
 els.settingsSection.addEventListener("change", (event) => {
 	const weekStartModeInput = event.target.closest("[data-week-start-mode]");
-	if (!weekStartModeInput || !weekStartModeInput.checked) return;
-	updateWeekStartMode(weekStartModeInput.value);
+	if (weekStartModeInput?.checked) {
+		updateWeekStartMode(weekStartModeInput.value);
+		return;
+	}
+
+	const startupScreenModeInput = event.target.closest("[data-startup-screen-mode]");
+	if (startupScreenModeInput?.checked) updateStartupScreenMode(startupScreenModeInput.value);
 });
 
 els.subjectsContent.addEventListener("dragstart", (event) => {
@@ -3171,7 +3199,7 @@ els.printTimetable.addEventListener("click", () => window.print());
 if (els.logoutButton) els.logoutButton.addEventListener("click", logout);
 
 render();
-showPage(getSavedPage());
+showPage(getStartupPage());
 setupNativeBackButton();
 loadRemoteState();
 refreshPushState();

@@ -1,4 +1,4 @@
-const CACHE_VERSION = "studyflow-v7";
+const CACHE_VERSION = "studyflow-v24";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const BASE_URL = new URL("./", self.location.href);
 const NAVIGATION_FALLBACK = new URL("offline.html", BASE_URL).pathname;

@@ -314,6 +314,10 @@ button,
 		transform 0.12s;
 }
 
+button[hidden] {
+	display: none;
+}
+
 button:hover,
 .file-label:hover,
 .signup-link-button:hover,
@@ -429,6 +433,102 @@ textarea:focus {
 	border-color: var(--primary);
 	box-shadow: var(--focus);
 	outline: 0;
+}
+
+input.is-locked {
+	background: var(--subtle);
+	color: var(--muted);
+	cursor: not-allowed;
+}
+
+input[type="checkbox"]:not([data-theme-toggle]) {
+	appearance: none;
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--panel) 92%, #fff), var(--field));
+	border: 1.5px solid var(--line-strong);
+	border-radius: 6px;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+	cursor: pointer;
+	display: inline-grid;
+	flex: 0 0 18px;
+	height: 18px;
+	margin: 0;
+	min-height: 18px;
+	place-content: center;
+	transition:
+		background 0.16s ease,
+		border-color 0.16s ease,
+		box-shadow 0.16s ease,
+		transform 0.12s ease;
+	width: 18px;
+}
+
+input[type="checkbox"]:not([data-theme-toggle])::before {
+	border: solid #fff;
+	border-width: 0 2px 2px 0;
+	content: "";
+	height: 9px;
+	opacity: 0;
+	transform: rotate(45deg) translate(-1px, -1px) scale(0.82);
+	transition:
+		opacity 0.12s ease,
+		transform 0.12s ease;
+	width: 5px;
+}
+
+input[type="checkbox"]:not([data-theme-toggle]):hover {
+	border-color: var(--interactive-border);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.5),
+		0 0 0 3px color-mix(in srgb, var(--primary) 8%, transparent);
+}
+
+input[type="checkbox"]:not([data-theme-toggle]):active {
+	transform: scale(0.94);
+}
+
+input[type="checkbox"]:not([data-theme-toggle]):checked {
+	background:
+		linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 72%, var(--success)));
+	border-color: color-mix(in srgb, var(--primary) 82%, var(--success));
+	box-shadow:
+		0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent),
+		0 4px 10px color-mix(in srgb, var(--primary) 24%, transparent);
+}
+
+input[type="checkbox"]:not([data-theme-toggle]):checked::before {
+	opacity: 1;
+	transform: rotate(45deg) translate(-1px, -1px) scale(1);
+}
+
+input[type="checkbox"]:not([data-theme-toggle]):indeterminate {
+	background: var(--primary);
+	border-color: var(--primary);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent);
+}
+
+input[type="checkbox"]:not([data-theme-toggle]):indeterminate::before {
+	background: #fff;
+	border: 0;
+	border-radius: 999px;
+	height: 2px;
+	opacity: 1;
+	transform: none;
+	width: 9px;
+}
+
+input[type="checkbox"]:not([data-theme-toggle]):focus-visible {
+	outline: 3px solid color-mix(in srgb, var(--primary) 26%, transparent);
+	outline-offset: 2px;
+}
+
+input[type="checkbox"]:not([data-theme-toggle]):disabled {
+	background: var(--subtle);
+	border-color: var(--line);
+	box-shadow: none;
+	cursor: not-allowed;
+	opacity: 0.7;
+	transform: none;
 }
 
 select {
@@ -1061,6 +1161,235 @@ label {
 	gap: 14px;
 }
 
+.signup-steps {
+	counter-reset: signup-step;
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	margin-bottom: 2px;
+	padding: 4px 0 2px;
+	position: relative;
+}
+
+.signup-steps::before {
+	background: var(--line);
+	content: "";
+	height: 2px;
+	left: calc(16.666% + 12px);
+	position: absolute;
+	right: calc(16.666% + 12px);
+	top: 18px;
+}
+
+.signup-steps span {
+	align-items: center;
+	color: var(--muted);
+	counter-increment: signup-step;
+	display: grid;
+	font-size: 13px;
+	font-weight: 800;
+	gap: 8px;
+	justify-items: center;
+	line-height: 1.25;
+	position: relative;
+	text-align: center;
+	z-index: 1;
+}
+
+.signup-steps span::before {
+	align-items: center;
+	background: var(--panel);
+	border: 2px solid var(--line-strong);
+	border-radius: 50%;
+	box-shadow: 0 0 0 4px var(--panel);
+	color: var(--muted);
+	content: counter(signup-step);
+	display: inline-flex;
+	font-size: 12px;
+	font-weight: 900;
+	height: 26px;
+	justify-content: center;
+	line-height: 1;
+	transition:
+		background 0.16s,
+		border-color 0.16s,
+		color 0.16s,
+		box-shadow 0.16s;
+	width: 26px;
+}
+
+.signup-steps span.active {
+	color: var(--ink);
+}
+
+.signup-steps span.active::before,
+.signup-steps span.is-complete::before {
+	background: var(--primary);
+	border-color: var(--primary);
+	box-shadow:
+		0 0 0 4px var(--panel),
+		0 0 0 7px color-mix(in srgb, var(--primary) 13%, transparent);
+	color: #fff;
+}
+
+.signup-steps span.is-complete {
+	color: var(--primary-dark);
+}
+
+.signup-steps span.is-complete::before {
+	content: "";
+}
+
+.signup-steps span.is-complete::after {
+	border: solid #fff;
+	border-width: 0 2px 2px 0;
+	content: "";
+	height: 10px;
+	position: absolute;
+	top: 7px;
+	transform: rotate(45deg);
+	width: 5px;
+}
+
+.signup-step-panel {
+	border: 0;
+	display: grid;
+	gap: 14px;
+	margin: 0;
+	min-inline-size: 0;
+	padding: 0;
+}
+
+.signup-step-panel[hidden] {
+	display: none;
+}
+
+.phone-code-fields,
+.email-code-fields,
+.signup-account-fields {
+	animation: reveal-signup-field 0.2s ease-out;
+	display: grid;
+	gap: 14px;
+}
+
+.phone-code-fields[hidden],
+.email-code-fields[hidden],
+.signup-account-fields[hidden] {
+	display: none;
+}
+
+.required-label,
+.optional-label {
+	border-radius: 999px;
+	display: inline-flex;
+	font-size: 11px;
+	font-weight: 900;
+	line-height: 1;
+	margin-right: 6px;
+	padding: 4px 6px;
+	vertical-align: 1px;
+}
+
+.required-label {
+	background: color-mix(in srgb, var(--primary) 14%, var(--panel));
+	color: var(--primary-dark);
+}
+
+.optional-label {
+	background: var(--subtle);
+	color: var(--muted);
+}
+
+.terms-view-button {
+	background: var(--panel);
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	box-shadow: none;
+	color: var(--primary-dark);
+	flex: 0 0 auto;
+	font-size: 12px;
+	font-weight: 800;
+	min-height: 30px;
+	padding: 0 10px;
+	width: auto;
+}
+
+.terms-view-button:hover {
+	background: var(--subtle);
+	border-color: var(--interactive-border);
+	box-shadow: none;
+	color: var(--ink);
+	transform: none;
+}
+
+.terms-consent-text {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.terms-consent-row {
+	align-items: center;
+	background: color-mix(in srgb, var(--panel) 80%, var(--subtle));
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	display: grid;
+	gap: 10px;
+	grid-template-columns: minmax(0, 1fr) auto;
+	padding: 12px;
+}
+
+.terms-consent-row-plain {
+	grid-template-columns: minmax(0, 1fr);
+}
+
+.terms-consent-row .marketing-check {
+	min-width: 0;
+}
+
+.terms-consent-row .marketing-check span {
+	line-height: 1.35;
+	overflow-wrap: anywhere;
+}
+
+.signup-all-consent {
+	background: color-mix(in srgb, var(--primary) 10%, var(--panel));
+	border: 1px solid var(--interactive-border);
+	border-radius: 12px;
+	margin-top: 4px;
+	padding: 14px;
+}
+
+.signup-all-consent span {
+	color: var(--ink);
+	font-size: 15px;
+	font-weight: 900;
+}
+
+.terms-dialog {
+	height: min(760px, calc(100vh - 32px));
+	max-width: min(760px, calc(100vw - 24px));
+	width: min(760px, calc(100vw - 24px));
+}
+
+.terms-dialog iframe {
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	height: calc(100% - 76px);
+	margin-top: 14px;
+	width: 100%;
+}
+
+@keyframes reveal-signup-field {
+	from {
+		opacity: 0;
+		transform: translateY(-6px);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
 .login-mode-switch {
 	background: var(--subtle);
 	border: 1px solid var(--line);
@@ -1281,7 +1610,45 @@ label {
 .profile-page-head h1 {
 	font-size: 22px;
 	line-height: 1.2;
+	margin-bottom: 0;
+}
+
+.profile-title-row {
+	align-items: center;
+	display: flex;
+	gap: 8px;
 	margin-bottom: 4px;
+}
+
+.profile-title-back {
+	align-items: center;
+	border: 1px solid var(--line);
+	border-radius: 9px;
+	color: var(--ink);
+	display: inline-flex;
+	flex: 0 0 auto;
+	height: 30px;
+	justify-content: center;
+	text-decoration: none;
+	transition:
+		background 0.15s,
+		border-color 0.15s;
+	width: 30px;
+}
+
+.profile-title-back:hover {
+	background: var(--subtle);
+	border-color: var(--interactive-border);
+}
+
+.profile-title-back svg {
+	fill: none;
+	height: 18px;
+	stroke: currentColor;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+	stroke-width: 2.4;
+	width: 18px;
 }
 
 .page-back-button {
@@ -1315,6 +1682,40 @@ label {
 	gap: 16px;
 }
 
+.profile-phone-verification {
+	background: color-mix(in srgb, var(--panel) 76%, var(--subtle));
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	display: grid;
+	gap: 12px;
+	padding: 12px;
+}
+
+.profile-phone-verification[hidden] {
+	display: none;
+}
+
+.profile-phone-code-fields {
+	display: grid;
+	gap: 12px;
+}
+
+.profile-phone-code-fields[hidden] {
+	display: none;
+}
+
+.profile-phone-help {
+	color: var(--muted);
+	font-size: 13px;
+	font-weight: 700;
+	line-height: 1.45;
+	margin: 0;
+}
+
+.profile-phone-help.is-success {
+	color: var(--primary-dark);
+}
+
 .profile-edit-actions {
 	display: flex;
 	gap: 10px;
@@ -1325,6 +1726,41 @@ label {
 .profile-edit-actions a,
 .profile-edit-actions button {
 	min-width: 110px;
+}
+
+.profile-toast {
+	background: var(--ink);
+	border: 1px solid color-mix(in srgb, var(--ink) 84%, #fff);
+	border-radius: 12px;
+	bottom: 22px;
+	box-shadow: 0 14px 34px rgba(15, 23, 42, 0.22);
+	color: var(--panel);
+	font-size: 14px;
+	font-weight: 800;
+	left: 50%;
+	max-width: min(420px, calc(100vw - 32px));
+	opacity: 0;
+	padding: 12px 16px;
+	pointer-events: none;
+	position: fixed;
+	text-align: center;
+	transform: translate(-50%, 12px);
+	transition:
+		opacity 0.18s,
+		transform 0.18s;
+	width: max-content;
+	z-index: 60;
+}
+
+.profile-toast.is-visible {
+	opacity: 1;
+	transform: translate(-50%, 0);
+}
+
+.profile-toast.is-error {
+	background: var(--warn);
+	border-color: color-mix(in srgb, var(--warn) 78%, #fff);
+	color: #fff;
 }
 
 /* =====================================================
@@ -3422,11 +3858,11 @@ td:has(.entry-cell) {
 	display: flex;
 	flex: none;
 	gap: 10px;
+	width: 100%;
 }
 
 .marketing-check input {
-	min-height: 18px;
-	width: 18px;
+	margin-top: 1px;
 }
 
 .marketing-check span {
@@ -3436,25 +3872,33 @@ td:has(.entry-cell) {
 	margin-bottom: 0;
 }
 
+.marketing-check span,
+.terms-consent-text {
+	word-break: keep-all;
+}
+
 .auto-plan-check {
 	align-items: center;
-	background: var(--subtle);
+	background: color-mix(in srgb, var(--panel) 78%, var(--subtle));
 	border: 1px solid var(--line);
-	border-radius: 8px;
+	border-radius: 10px;
 	display: flex;
 	gap: 10px;
 	padding: 12px 14px;
-	transition: border-color 0.15s;
+	transition:
+		background 0.15s,
+		border-color 0.15s,
+		box-shadow 0.15s;
 }
 
 .auto-plan-check:has(input:checked) {
-	border-color: var(--interactive-border);
 	background: var(--soft);
+	border-color: var(--interactive-border);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 8%, transparent);
 }
 
 .auto-plan-check input {
-	min-height: 18px;
-	width: 18px;
+	margin-top: 1px;
 }
 
 .auto-plan-check span {
@@ -3481,14 +3925,15 @@ td:has(.entry-cell) {
 
 /* Schedule days */
 .schedule-days {
-	border: 1px solid var(--line-strong);
-	border-radius: 8px;
+	background: var(--field);
+	border: 1px solid var(--line);
+	border-radius: 10px;
 	display: flex;
 	flex: 2 1 360px;
-	gap: 4px;
+	gap: 6px;
 	margin: 0;
 	min-height: 40px;
-	padding: 6px 8px;
+	padding: 6px;
 }
 
 .schedule-days label {
@@ -3497,11 +3942,24 @@ td:has(.entry-cell) {
 	display: inline-flex;
 	flex: 0 0 auto;
 	font-size: 13px;
-	font-weight: 600;
-	gap: 3px;
+	font-weight: 700;
+	gap: 6px;
+	min-height: 30px;
+	padding: 0 8px;
+	border-radius: 8px;
+	transition:
+		background 0.12s,
+		color 0.12s;
+}
+
+.schedule-days label:has(input:checked) {
+	background: color-mix(in srgb, var(--primary) 9%, var(--panel));
+	color: var(--primary-dark);
 }
 
 .schedule-days input {
+	flex-basis: 16px;
+	height: 16px;
 	min-height: 16px;
 	width: 16px;
 }
@@ -3517,10 +3975,10 @@ dialog .schedule-days {
 }
 
 dialog .schedule-days label {
+	border-radius: 6px;
 	justify-content: center;
 	min-height: 36px;
-	padding: 0 6px;
-	border-radius: 6px;
+	padding: 0 7px;
 	transition: background 0.12s;
 }
 
@@ -3928,7 +4386,9 @@ dialog label {
 	}
 
 	.profile-page-head {
-		flex-direction: column;
+		align-items: center;
+		flex-direction: row;
+		justify-content: flex-start;
 		padding: 14px 16px;
 	}
 
@@ -4138,6 +4598,9 @@ dialog label {
 
 	.topbar,
 	.profile-page-head {
+		align-items: center;
+		flex-direction: row;
+		justify-content: flex-start;
 		gap: 8px;
 		padding: 7px 10px;
 	}

@@ -10,7 +10,8 @@ const dayNumbers = new Map(dayLabels.map((label, index) => [label, index]));
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const settingKeyPattern = /^[A-Za-z][A-Za-z0-9_.-]{0,99}$/;
 const defaultUserSettings = {
-  weekStartMode: "monday"
+  weekStartMode: "monday",
+  startupScreenMode: "weekly"
 };
 
 function ensureUuid(value) {
@@ -118,6 +119,7 @@ function buildStateFromRecordsets(recordsets) {
     ...Object.fromEntries(userSettingRows.map((setting) => [setting.settingKey, setting.settingValue || ""]))
   };
   if (!["monday", "today"].includes(userSettings.weekStartMode)) userSettings.weekStartMode = defaultUserSettings.weekStartMode;
+  if (!["weekly", "last"].includes(userSettings.startupScreenMode)) userSettings.startupScreenMode = defaultUserSettings.startupScreenMode;
 
   return {
     profile: {
@@ -149,6 +151,9 @@ function normalizeUserSettings(settings = {}) {
 
   if (!["monday", "today"].includes(normalized.weekStartMode)) {
     normalized.weekStartMode = defaultUserSettings.weekStartMode;
+  }
+  if (!["weekly", "last"].includes(normalized.startupScreenMode)) {
+    normalized.startupScreenMode = defaultUserSettings.startupScreenMode;
   }
 
   return normalized;
@@ -310,6 +315,13 @@ router.put("/settings", requireAuth, requireTeacher, async (request, response, n
     return response.status(400).json({
       error: "invalid_setting_value",
       message: "Week start mode must be monday or today."
+    });
+  }
+
+  if (settingKey === "startupScreenMode" && !["weekly", "last"].includes(settingValue)) {
+    return response.status(400).json({
+      error: "invalid_setting_value",
+      message: "Startup screen mode must be weekly or last."
     });
   }
 

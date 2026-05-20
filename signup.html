@@ -24,42 +24,102 @@
             <h1>회원가입</h1>
           </div>
         </div>
-        <p class="login-copy">스터디플로우 계정 생성을 위한 기본 정보를 입력하세요.</p>
+        <p class="login-copy">휴대폰 인증 후 계정 정보를 입력하세요.</p>
 
         <form class="login-form" data-auth-form="signup">
-          <label>
-            <span>이메일</span>
-            <input type="email" name="email" autocomplete="email" required placeholder="manager@example.com">
-          </label>
-          <label>
-            <span>비밀번호</span>
-            <input type="password" name="password" autocomplete="new-password" required placeholder="비밀번호">
-          </label>
-          <label>
-            <span>비밀번호 확인</span>
-            <input type="password" name="passwordConfirm" autocomplete="new-password" required placeholder="비밀번호 확인">
-          </label>
-          <label>
-            <span>이름</span>
-            <input type="text" name="name" autocomplete="name" required placeholder="이름">
-          </label>
-          <label>
-            <span>휴대폰</span>
-            <input type="tel" name="phone" autocomplete="tel" placeholder="010-0000-0000">
-          </label>
-          <label class="marketing-check">
-            <input type="checkbox" name="marketingConsent">
-            <span>마케팅 수신 동의</span>
-          </label>
-          <button type="submit">가입하기</button>
+          <div class="signup-steps" aria-label="회원가입 단계">
+            <span class="active" data-signup-step-dot="phone">휴대폰 인증</span>
+            <span data-signup-step-dot="profile">정보 입력</span>
+            <span data-signup-step-dot="terms">약관 동의</span>
+          </div>
+          <fieldset class="signup-step-panel" data-signup-step="phone">
+            <label>
+              <span>이름</span>
+              <input type="text" name="name" autocomplete="name" required placeholder="이름">
+            </label>
+            <label>
+              <span>휴대폰</span>
+              <input type="tel" name="phone" autocomplete="tel" required placeholder="010-0000-0000">
+            </label>
+            <button type="button" data-phone-code-send>인증번호 받기</button>
+            <div class="phone-code-fields" data-phone-code-fields hidden>
+              <label>
+                <span>인증번호</span>
+                <input type="text" name="phoneCode" inputmode="numeric" autocomplete="one-time-code" required maxlength="6" placeholder="6자리 인증번호">
+              </label>
+              <button type="button" data-phone-code-verify>인증하기</button>
+            </div>
+          </fieldset>
+          <fieldset class="signup-step-panel" data-signup-step="profile" hidden disabled>
+            <label>
+              <span>이메일</span>
+              <input type="email" name="email" autocomplete="email" required placeholder="manager@example.com">
+            </label>
+            <button type="button" data-email-code-send>이메일 인증번호 받기</button>
+            <div class="email-code-fields" data-email-code-fields hidden>
+              <label>
+                <span>이메일 인증번호</span>
+                <input type="text" name="emailCode" inputmode="numeric" autocomplete="one-time-code" required maxlength="6" placeholder="6자리 인증번호">
+              </label>
+              <button type="button" data-email-code-verify>이메일 인증하기</button>
+            </div>
+            <div class="signup-account-fields" data-signup-account-fields hidden>
+              <label>
+                <span>비밀번호</span>
+                <input type="password" name="password" autocomplete="new-password" required placeholder="비밀번호">
+              </label>
+              <label>
+                <span>비밀번호 확인</span>
+                <input type="password" name="passwordConfirm" autocomplete="new-password" required placeholder="비밀번호 확인">
+              </label>
+              <button type="button" data-signup-next>다음</button>
+            </div>
+          </fieldset>
+          <fieldset class="signup-step-panel" data-signup-step="terms" hidden disabled>
+            <div class="terms-consent-row">
+              <label class="marketing-check">
+                <input type="checkbox" name="termsConsent" required>
+                <span class="terms-consent-text"><strong class="required-label">필수</strong> 서비스 이용약관 동의</span>
+              </label>
+              <button class="terms-view-button" type="button" data-terms-open="agree">보기</button>
+            </div>
+            <div class="terms-consent-row">
+              <label class="marketing-check">
+                <input type="checkbox" name="privacyConsent" required>
+                <span class="terms-consent-text"><strong class="required-label">필수</strong> 개인정보 처리방침 동의</span>
+              </label>
+              <button class="terms-view-button" type="button" data-terms-open="policy">보기</button>
+            </div>
+            <div class="terms-consent-row terms-consent-row-plain">
+              <label class="marketing-check">
+                <input type="checkbox" name="marketingConsent">
+                <span class="terms-consent-text"><strong class="optional-label">선택</strong> 마케팅 수신 동의</span>
+              </label>
+            </div>
+            <label class="marketing-check signup-all-consent">
+              <input type="checkbox" name="allConsent" data-all-consent>
+              <span>모두 동의합니다.</span>
+            </label>
+            <button type="submit">가입하기</button>
+          </fieldset>
         </form>
         <p class="form-message" data-auth-message role="status" aria-live="polite"></p>
-        <a class="signup-link-button" href="./login.html">로그인으로 돌아가기</a>
+        <a class="signup-link-button" href="./login.html">취소</a>
       </section>
     </main>
     <div class="auth-overlay" id="authOverlay" hidden>
       <div class="auth-spinner"></div>
     </div>
+    <dialog class="terms-dialog" id="termsDialog">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">Agreement</p>
+          <h3 id="termsDialogTitle">약관</h3>
+        </div>
+        <button class="icon-btn" type="button" id="closeTermsDialog" aria-label="닫기">×</button>
+      </div>
+      <iframe id="termsDialogFrame" title="약관 내용"></iframe>
+    </dialog>
     <script src="./auth.js"></script>
   </body>
 </html>
