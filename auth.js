@@ -106,7 +106,7 @@ async function submitLogin(event) {
 				});
 
 	saveSession(result);
-	window.location.href = result.user?.role === "student" ? "./student.html" : "./index.html";
+	window.location.replace(result.user?.role === "student" ? "./student.html" : "./index.html");
 }
 
 async function submitSignup(event) {
@@ -128,7 +128,7 @@ async function submitSignup(event) {
 	});
 
 	saveSession(result);
-	window.location.href = "./index.html";
+	window.location.replace("./index.html");
 }
 
 async function submitPasswordReset(event) {

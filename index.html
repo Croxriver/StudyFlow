@@ -20,7 +20,7 @@
 			<header class="topbar">
 				<div class="topbar-main">
 					<div class="brand-lockup">
-						<img class="brand-text-logo" src="./assets/logo_text.svg" alt="StudyFlow 스터디플로우" />
+						<img class="brand-text-logo" src="./assets/logo_text.svg" data-light-src="./assets/logo_text.svg" data-dark-src="./assets/logo_text_light.svg" alt="StudyFlow 스터디플로우" />
 					</div>
 				</div>
 				<div class="topbar-theme-slot" id="topbarThemeSlot" hidden>
@@ -193,6 +193,20 @@
 					<input id="entryCompleted" type="checkbox" />
 					<span>학습 완료</span>
 				</label>
+				<section class="entry-completed-info" id="entryCompletedInfo" hidden aria-label="완료된 학습 정보">
+					<div>
+						<span>학습 시작 시간</span>
+						<p id="entryStudyStartedAt">-</p>
+					</div>
+					<div>
+						<span>진행 시간</span>
+						<p id="entryStudyDuration">-</p>
+					</div>
+					<div>
+						<span>학생 메모</span>
+						<p id="entryStudentFeedback">-</p>
+					</div>
+				</section>
 				<div class="dialog-actions entry-dialog-actions">
 					<div class="entry-plan-actions">
 						<button class="ghost" id="pushPlan" value="push" type="button">이후 계획 하루 밀기</button>
@@ -482,6 +496,7 @@
 			</form>
 		</dialog>
 
+		<script src="./push-client.js"></script>
 		<script src="./app.js"></script>
 	</body>
 </html>

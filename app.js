@@ -14,6 +14,7 @@ if (!authToken) {
 
 const authUser = authSession.user;
 const STORAGE_KEY = getAccountStorageKey();
+const PAGE_STORAGE_KEY = "studyflow-teacher-active-page";
 const accountStateBeforeRemoteLoad = localStorage.getItem(STORAGE_KEY);
 const legacyStateBeforeRemoteLoad = localStorage.getItem(LEGACY_STORAGE_KEY);
 
@@ -48,12 +49,14 @@ let activeChildEdit = null;
 let activeSubjectSettingEdit = null;
 let activeSubjectDragId = "";
 let activeRewardResetChild = "";
+let activePage = "weekly";
 let weekChildFilter = "all";
 let weekSubjectFilter = "all";
 let weekSearchQuery = "";
 let syncStateTimer = null;
 let isHydratingRemoteState = false;
 let isForcingChildRegistration = false;
+let pushState = { supported: false, subscribed: false, permission: "default" };
 
 function getAuthUser() {
 	try {
@@ -145,6 +148,10 @@ const els = {
 	entryAmount: document.querySelector("#entryAmount"),
 	entryMemo: document.querySelector("#entryMemo"),
 	entryCompleted: document.querySelector("#entryCompleted"),
+	entryCompletedInfo: document.querySelector("#entryCompletedInfo"),
+	entryStudyStartedAt: document.querySelector("#entryStudyStartedAt"),
+	entryStudyDuration: document.querySelector("#entryStudyDuration"),
+	entryStudentFeedback: document.querySelector("#entryStudentFeedback"),
 	closeEntryDialog: document.querySelector("#closeEntryDialog"),
 	cancelEntryDialog: document.querySelector("#cancelEntryDialog"),
 	deleteEntry: document.querySelector("#deleteEntry"),
@@ -475,9 +482,38 @@ async function syncTeacherEntry(entry) {
 			localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 		}
 		setSyncStatus("학습 기록 저장 완료");
+		return data.entry || entry;
 	} catch (error) {
 		setSyncStatus("학습 기록 저장 실패", true);
 		console.warn("Failed to save entry.", error);
+		return null;
+	}
+}
+
+async function notifyStudentManualSchedule(entry) {
+	const childAccount = state.childAccounts.find((account) => account.name === entry.child);
+	const subject = getSubjectsForChild(entry.child).find((item) => item.id === entry.subjectId);
+	if (!childAccount?.id || !subject) return;
+
+	try {
+		await fetch("/api/push/teacher-schedule", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${authToken}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				childId: childAccount.id,
+				childName: entry.child,
+				subjectName: subject.name,
+				bookName: subject.book,
+				date: entry.date,
+				amount: entry.amount || "",
+				memo: entry.memo || "",
+			}),
+		});
+	} catch (error) {
+		console.warn("Failed to send manual schedule push.", error);
 	}
 }
 
@@ -610,6 +646,9 @@ function setSyncStatus(text, isError = false) {
 }
 
 function logout() {
+	window.StudyFlowPush?.unregisterNativeAppToken(authToken).catch((error) => {
+		console.warn("Failed to unregister native push token.", error);
+	});
 	localStorage.removeItem(`${AUTH_TOKEN_KEY_PREFIX}teacher`);
 	localStorage.removeItem(`${AUTH_USER_KEY_PREFIX}teacher`);
 	localStorage.removeItem(AUTH_TOKEN_KEY);
@@ -724,16 +763,57 @@ function renderProfile() {
 	els.profileEmail.textContent = state.profile.email;
 }
 
+function getSavedPage(defaultPage = "weekly") {
+	try {
+		const savedPage = sessionStorage.getItem(PAGE_STORAGE_KEY);
+		return Array.from(els.pageViews).some((view) => view.dataset.page === savedPage) ? savedPage : defaultPage;
+	} catch {
+		return defaultPage;
+	}
+}
+
 function showPage(page) {
+	const nextPage = Array.from(els.pageViews).some((view) => view.dataset.page === page) ? page : "weekly";
+	activePage = nextPage;
 	els.pageViews.forEach((view) => {
-		view.classList.toggle("active", view.dataset.page === page);
+		view.classList.toggle("active", view.dataset.page === nextPage);
 	});
 	if (els.topbarThemeSlot) {
-		els.topbarThemeSlot.hidden = page !== "mypage";
+		els.topbarThemeSlot.hidden = nextPage !== "mypage";
 	}
-	const navPage = page === "subjects" ? "mypage" : page;
+	const navPage = nextPage === "subjects" ? "mypage" : nextPage;
 	els.navItems.forEach((item) => {
 		item.classList.toggle("active", item.dataset.targetPage === navPage);
+	});
+	try {
+		sessionStorage.setItem(PAGE_STORAGE_KEY, nextPage);
+	} catch {}
+}
+
+function isNativeApp() {
+	if (window.StudyFlowPush?.isNativeApp?.()) return true;
+	if (typeof window.Capacitor?.isNativePlatform === "function") return window.Capacitor.isNativePlatform();
+	return ["android", "ios"].includes(window.Capacitor?.getPlatform?.());
+}
+
+function closeOpenDialogForBack() {
+	const dialog = document.querySelector("dialog[open]");
+	if (!dialog || (dialog === els.childAccountDialog && isForcingChildRegistration)) return false;
+	dialog.close();
+	return true;
+}
+
+function setupNativeBackButton() {
+	const appPlugin = window.Capacitor?.Plugins?.App;
+	if (!isNativeApp() || !appPlugin?.addListener) return;
+
+	appPlugin.addListener("backButton", () => {
+		if (closeOpenDialogForBack()) return;
+		if (activePage !== "weekly") {
+			showPage("weekly");
+			return;
+		}
+		appPlugin.exitApp();
 	});
 }
 
@@ -868,12 +948,18 @@ function renderTable() {
 	}
 
 	const dates = getWeekDates();
+	const todayKey = formatDate(new Date());
 	const head = `
     <thead>
       <tr>
         <th>과목</th>
         <th>교재</th>
-        ${dates.map((date, index) => `<th>${displayDate(date)} ${dayNames[index]}</th>`).join("")}
+        ${dates
+			.map((date, index) => {
+				const isToday = formatDate(date) === todayKey;
+				return `<th class="${isToday ? "is-today" : ""}">${displayDate(date)} ${dayNames[index]}${isToday ? `<span class="today-column-badge">오늘</span>` : ""}</th>`;
+			})
+			.join("")}
       </tr>
     </thead>
   `;
@@ -1297,6 +1383,21 @@ function renderMyPage() {
 	const completedEntries = entries.filter((entry) => entry.completed).length;
 	const completionRate = totalEntries ? Math.round((completedEntries / totalEntries) * 100) : 0;
 	const activeBooks = children.reduce((count, child) => count + getActiveSubjectsForChild(child).length, 0);
+	const pushPanelMarkup = shouldShowWebPushPanel()
+		? `
+    <div class="profile-panel push-panel">
+      <div>
+        <p class="eyebrow">Push Notification</p>
+        <h3>푸시 알림</h3>
+        <p data-push-status>${escapeHtml(getPushStatusText())}</p>
+      </div>
+      <div class="profile-panel-actions push-panel-actions">
+        <button class="ghost logout-button" type="button" data-push-toggle ${pushState.supported ? "" : "disabled"}>${pushState.subscribed ? "수신 해제" : "수신 등록"}</button>
+      </div>
+      <p class="form-message" data-push-message></p>
+    </div>
+`
+		: "";
 
 	els.mypageContent.innerHTML = `
     <div class="profile-panel">
@@ -1310,6 +1411,8 @@ function renderMyPage() {
         <button class="ghost logout-button" type="button" data-logout-button>로그아웃</button>
       </div>
     </div>
+
+    ${pushPanelMarkup}
 
     <div class="profile-panel">
       <div>
@@ -1351,6 +1454,72 @@ function renderMyPage() {
 	if (typeof applyTheme === "function" && typeof getSavedTheme === "function") {
 		applyTheme(getSavedTheme());
 	}
+}
+
+function shouldShowWebPushPanel() {
+	return !window.StudyFlowPush?.isNativeApp?.();
+}
+
+function getPushStatusText() {
+	if (!pushState.supported) return "이 브라우저는 푸시 알림을 지원하지 않습니다.";
+	if (pushState.subscribed) return "이 기기는 푸시 알림을 받을 수 있습니다.";
+	if (pushState.permission === "denied") return "브라우저에서 알림 권한이 차단되어 있습니다.";
+	return "이 기기에서 알림 수신을 등록할 수 있습니다.";
+}
+
+function setPushMessage(text, isError = false) {
+	const message = els.mypageContent.querySelector("[data-push-message]");
+	if (!message) return;
+	message.textContent = text;
+	message.classList.toggle("is-error", isError);
+}
+
+function updatePushPanel() {
+	const status = els.mypageContent.querySelector("[data-push-status]");
+	const button = els.mypageContent.querySelector("[data-push-toggle]");
+	if (status) status.textContent = getPushStatusText();
+	if (button) {
+		button.textContent = pushState.subscribed ? "수신 해제" : "수신 등록";
+		button.disabled = !pushState.supported;
+	}
+}
+
+async function refreshPushState() {
+	if (!shouldShowWebPushPanel()) return;
+	if (!window.StudyFlowPush) return;
+	try {
+		pushState = await window.StudyFlowPush.getSubscriptionState(authToken);
+		updatePushPanel();
+	} catch (error) {
+		pushState = { supported: false, subscribed: false, permission: "default" };
+		updatePushPanel();
+		console.warn("Failed to refresh push state.", error);
+	}
+}
+
+async function togglePushSubscription() {
+	if (!shouldShowWebPushPanel()) return;
+	if (!window.StudyFlowPush) {
+		setPushMessage("푸시 기능을 사용할 수 없습니다.", true);
+		return;
+	}
+
+	try {
+		setPushMessage(pushState.subscribed ? "수신 해제 중입니다..." : "수신 등록 중입니다...");
+		pushState = pushState.subscribed
+			? await window.StudyFlowPush.unsubscribe(authToken)
+			: await window.StudyFlowPush.subscribe(authToken);
+		updatePushPanel();
+		setPushMessage(pushState.subscribed ? "수신 등록되었습니다." : "수신 해제되었습니다.");
+	} catch (error) {
+		setPushMessage(error.message || "푸시 설정을 변경하지 못했습니다.", true);
+	}
+}
+
+function registerNativePushIfAvailable() {
+	window.StudyFlowPush?.registerNativeAppToken(authToken).catch((error) => {
+		console.warn("Failed to register native push token.", error);
+	});
 }
 
 function renderSubjectsPage() {
@@ -1700,6 +1869,12 @@ function openEntryDialog(button) {
 	els.entryAmount.value = entry?.amount || "";
 	els.entryMemo.value = entry?.memo || "";
 	els.entryCompleted.checked = Boolean(entry?.completed);
+	if (els.entryCompletedInfo) {
+		els.entryCompletedInfo.hidden = !entry?.completed;
+		els.entryStudyStartedAt.textContent = entry?.studyStartedAt ? formatDateTime(entry.studyStartedAt) : "-";
+		els.entryStudyDuration.textContent = formatStudyDurationSeconds(entry?.studyDurationSeconds) || "-";
+		els.entryStudentFeedback.textContent = entry?.studentFeedback?.trim() || "-";
+	}
 	els.deleteEntry.hidden = !entry;
 	const futureEntries = getEntriesFromDate(child, subjectId, date);
 	els.pushPlan.hidden = futureEntries.length === 0;
@@ -1715,6 +1890,7 @@ function saveEntry() {
 	const completed = els.entryCompleted.checked;
 	let savedEntry = null;
 	let shouldSyncEntry = false;
+	let shouldNotifyManualSchedule = false;
 
 	if (!amount && !memo && !completed) {
 		delete state.entries[activeEntry.key];
@@ -1727,9 +1903,11 @@ function saveEntry() {
 		}
 
 		const previousEntry = state.entries[activeEntry.key] || {};
+		shouldNotifyManualSchedule = !completed && Boolean(amount || memo) && !previousEntry.planned && !previousEntry.amount && !previousEntry.memo && !previousEntry.completed;
 		const reward = getRewardForCompletedEntry(subject, completed, previousEntry);
 
 		savedEntry = {
+			...previousEntry,
 			...activeEntry,
 			amount,
 			memo,
@@ -1748,7 +1926,13 @@ function saveEntry() {
 	activeEntry = null;
 	els.entryDialog.close();
 	render();
-	if (shouldSyncEntry) syncTeacherEntry(savedEntry);
+	if (shouldSyncEntry) {
+		syncTeacherEntry(savedEntry).then((syncedEntry) => {
+			if (shouldNotifyManualSchedule && syncedEntry) {
+				notifyStudentManualSchedule(syncedEntry);
+			}
+		});
+	}
 }
 
 function deleteEntry() {
@@ -2524,6 +2708,17 @@ function formatDateTime(value) {
 	}).format(date);
 }
 
+function formatStudyDurationSeconds(seconds) {
+	const totalSeconds = Number.parseInt(seconds, 10) || 0;
+	if (totalSeconds <= 0) return "";
+	const hours = Math.floor(totalSeconds / 3600);
+	const minutes = Math.floor((totalSeconds % 3600) / 60);
+	const remainSeconds = totalSeconds % 60;
+	if (hours) return `${hours}시간 ${minutes}분`;
+	if (minutes) return `${minutes}분 ${remainSeconds}초`;
+	return `${remainSeconds}초`;
+}
+
 function getRedeemableRewardEntriesForChild(child) {
 	return Object.values(state.entries || {})
 		.filter((entry) => entry.child === child && entry.rewardAwarded && !entry.rewardRedeemed)
@@ -2664,6 +2859,12 @@ els.navItems.forEach((item) => {
 	item.addEventListener("click", () => showPage(item.dataset.targetPage));
 });
 els.mypageContent.addEventListener("click", (event) => {
+	const pushToggle = event.target.closest("[data-push-toggle]");
+	if (pushToggle) {
+		togglePushSubscription();
+		return;
+	}
+
 	const logoutButton = event.target.closest("[data-logout-button]");
 	if (logoutButton) {
 		logout();
@@ -2865,7 +3066,11 @@ els.printTimetable.addEventListener("click", () => window.print());
 if (els.logoutButton) els.logoutButton.addEventListener("click", logout);
 
 render();
+showPage(getSavedPage());
+setupNativeBackButton();
 loadRemoteState();
+refreshPushState();
+registerNativePushIfAvailable();
 
 // Mouse drag-to-scroll for .summary-grid
 document.querySelectorAll(".summary-grid").forEach((el) => {

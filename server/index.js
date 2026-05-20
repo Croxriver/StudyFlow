@@ -4,6 +4,7 @@ const cors = require("cors");
 require("dotenv").config();
 
 const authRoutes = require("./routes/auth");
+const pushRoutes = require("./routes/push");
 const stateRoutes = require("./routes/state");
 const studentRoutes = require("./routes/student");
 
@@ -23,6 +24,7 @@ app.get("/api/health", (_request, response) => {
 });
 
 app.use("/api/auth", authRoutes);
+app.use("/api/push", pushRoutes);
 app.use("/api/state", stateRoutes);
 app.use("/api/student", studentRoutes);
 

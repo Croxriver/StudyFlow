@@ -2,6 +2,7 @@
 const AUTH_USER_KEY = "local-study-manager-user";
 const AUTH_TOKEN_KEY_PREFIX = `${AUTH_TOKEN_KEY}:`;
 const AUTH_USER_KEY_PREFIX = `${AUTH_USER_KEY}:`;
+const PAGE_STORAGE_KEY = "studyflow-student-active-page";
 const authSession = getSessionForRole("student");
 const authToken = authSession.token;
 const authUser = authSession.user;
@@ -22,18 +23,19 @@ let planFilter = "all";
 let activePage = "today";
 let activeStudy = null;
 let studyTimer = null;
+let pushState = { supported: false, subscribed: false, permission: "default" };
 
 const els = {
 	pageViews: document.querySelectorAll(".page-view"),
 	navItems: document.querySelectorAll(".nav-item"),
-	avatar: document.querySelector("#studentAvatar"),
 	studentName: document.querySelector("#studentName"),
 	teacherName: document.querySelector("#teacherName"),
 	accountSummary: document.querySelector("#studentAccountSummary"),
+	pushStatus: document.querySelector("#studentPushStatus"),
+	pushToggle: document.querySelector("#studentPushToggle"),
+	pushMessage: document.querySelector("#studentPushMessage"),
+	topbarThemeSlot: document.querySelector("#studentTopbarThemeSlot"),
 	logout: document.querySelector("#studentLogout"),
-	todayCompleteCount: document.querySelector("#todayCompleteCount"),
-	weekPlanCount: document.querySelector("#weekPlanCount"),
-	rewardTotal: document.querySelector("#studentRewardTotal"),
 	rewardPageTotal: document.querySelector("#studentRewardPageTotal"),
 	rewardHistoryCount: document.querySelector("#studentRewardHistoryCount"),
 	prevWeek: document.querySelector("#studentPrevWeek"),
@@ -60,7 +62,7 @@ const els = {
 
 const pageTitles = {
 	today: "오늘 학습",
-	week: "이번 주 학습",
+	week: "주간 학습",
 	rewards: "보상 이력",
 	mypage: "마이페이지",
 };
@@ -104,6 +106,81 @@ function setStatus(text, isError = false) {
 	if (isError) console.warn(`[StudyFlow Student] ${text}`);
 }
 
+function getPushStatusText() {
+	if (!pushState.supported) return "이 브라우저는 푸시 알림을 지원하지 않습니다.";
+	if (pushState.subscribed) return "이 기기는 선생님 알림을 받을 수 있습니다.";
+	if (pushState.permission === "denied") return "브라우저에서 알림 권한이 차단되어 있습니다.";
+	return "이 기기에서 선생님 알림 수신을 등록할 수 있습니다.";
+}
+
+function setPushMessage(text, isError = false) {
+	if (!els.pushMessage) return;
+	els.pushMessage.textContent = text;
+	els.pushMessage.classList.toggle("is-error", isError);
+}
+
+function shouldShowWebPushPanel() {
+	return !window.StudyFlowPush?.isNativeApp?.();
+}
+
+function updateWebPushPanelVisibility() {
+	const panel = els.pushStatus?.closest(".student-setting-panel");
+	const hidden = !shouldShowWebPushPanel();
+	if (panel) panel.hidden = hidden;
+	if (els.pushMessage) els.pushMessage.hidden = hidden;
+}
+
+function updatePushPanel() {
+	updateWebPushPanelVisibility();
+	if (!shouldShowWebPushPanel()) return;
+	if (els.pushStatus) els.pushStatus.textContent = getPushStatusText();
+	if (els.pushToggle) {
+		els.pushToggle.textContent = pushState.subscribed ? "수신 해제" : "수신 등록";
+		els.pushToggle.disabled = !pushState.supported;
+	}
+}
+
+async function refreshPushState() {
+	if (!shouldShowWebPushPanel()) {
+		updateWebPushPanelVisibility();
+		return;
+	}
+	if (!window.StudyFlowPush) return;
+	try {
+		pushState = await window.StudyFlowPush.getSubscriptionState(authToken);
+		updatePushPanel();
+	} catch (error) {
+		pushState = { supported: false, subscribed: false, permission: "default" };
+		updatePushPanel();
+		console.warn("Failed to refresh push state.", error);
+	}
+}
+
+async function togglePushSubscription() {
+	if (!shouldShowWebPushPanel()) return;
+	if (!window.StudyFlowPush) {
+		setPushMessage("푸시 기능을 사용할 수 없습니다.", true);
+		return;
+	}
+
+	try {
+		setPushMessage(pushState.subscribed ? "수신 해제 중입니다..." : "수신 등록 중입니다...");
+		pushState = pushState.subscribed
+			? await window.StudyFlowPush.unsubscribe(authToken)
+			: await window.StudyFlowPush.subscribe(authToken);
+		updatePushPanel();
+		setPushMessage(pushState.subscribed ? "수신 등록되었습니다." : "수신 해제되었습니다.");
+	} catch (error) {
+		setPushMessage(error.message || "푸시 설정을 변경하지 못했습니다.", true);
+	}
+}
+
+function registerNativePushIfAvailable() {
+	window.StudyFlowPush?.registerNativeAppToken(authToken).catch((error) => {
+		console.warn("Failed to register native push token.", error);
+	});
+}
+
 function getStudentName() {
 	return state.student.name || authUser.name || "학생";
 }
@@ -112,13 +189,51 @@ function getStudentInitial() {
 	return getStudentName().trim().charAt(0).toUpperCase() || "S";
 }
 
+function getSavedPage(defaultPage = "today") {
+	try {
+		const savedPage = sessionStorage.getItem(PAGE_STORAGE_KEY);
+		return pageTitles[savedPage] ? savedPage : defaultPage;
+	} catch {
+		return defaultPage;
+	}
+}
+
 function showPage(page) {
 	activePage = pageTitles[page] ? page : "today";
 	els.pageViews.forEach((view) => {
 		view.classList.toggle("active", view.dataset.page === activePage);
 	});
+	if (els.topbarThemeSlot) {
+		els.topbarThemeSlot.hidden = activePage !== "mypage";
+	}
 	els.navItems.forEach((item) => {
 		item.classList.toggle("active", item.dataset.targetPage === activePage);
+	});
+	try {
+		sessionStorage.setItem(PAGE_STORAGE_KEY, activePage);
+	} catch {}
+}
+
+function isNativeApp() {
+	if (window.StudyFlowPush?.isNativeApp?.()) return true;
+	if (typeof window.Capacitor?.isNativePlatform === "function") return window.Capacitor.isNativePlatform();
+	return ["android", "ios"].includes(window.Capacitor?.getPlatform?.());
+}
+
+function setupNativeBackButton() {
+	const appPlugin = window.Capacitor?.Plugins?.App;
+	if (!isNativeApp() || !appPlugin?.addListener) return;
+
+	appPlugin.addListener("backButton", () => {
+		if (!els.studySessionScreen.hidden) {
+			closeStudySession();
+			return;
+		}
+		if (activePage !== "today") {
+			showPage("today");
+			return;
+		}
+		appPlugin.exitApp();
 	});
 }
 
@@ -127,6 +242,13 @@ function formatDate(date) {
 	const month = String(date.getMonth() + 1).padStart(2, "0");
 	const day = String(date.getDate()).padStart(2, "0");
 	return `${year}-${month}-${day}`;
+}
+
+function displayDate(date) {
+	return new Intl.DateTimeFormat("ko-KR", {
+		month: "short",
+		day: "numeric",
+	}).format(date);
 }
 
 function parseDate(dateText) {
@@ -192,6 +314,39 @@ function filterPlans(plans) {
 	if (planFilter === "completed") return plans.filter((plan) => plan.entry?.completed);
 	if (planFilter === "pending") return plans.filter((plan) => !plan.entry?.completed);
 	return plans;
+}
+
+function shouldShowPlan(plan) {
+	if (!plan) return false;
+	if (planFilter === "completed") return Boolean(plan.entry?.completed);
+	if (planFilter === "pending") return !plan.entry?.completed;
+	return true;
+}
+
+function comparePlanCards(a, b) {
+	const aCompleted = a.entry?.completed ? 1 : 0;
+	const bCompleted = b.entry?.completed ? 1 : 0;
+	const aTime = normalizeScheduleTime(a.subject.scheduleTime) || "99:99";
+	const bTime = normalizeScheduleTime(b.subject.scheduleTime) || "99:99";
+	return (
+		aCompleted - bCompleted ||
+		a.date.localeCompare(b.date) ||
+		aTime.localeCompare(bTime) ||
+		a.subject.name.localeCompare(b.subject.name, "ko-KR") ||
+		a.subject.book.localeCompare(b.subject.book, "ko-KR")
+	);
+}
+
+function groupSubjectsByName(subjects) {
+	return subjects.reduce((groups, item) => {
+		const last = groups.at(-1);
+		if (last?.name === item.subject.name) {
+			last.subjects.push(item);
+		} else {
+			groups.push({ name: item.subject.name, subjects: [item] });
+		}
+		return groups;
+	}, []);
 }
 
 function getRewardTotals(entries = Object.values(state.entries)) {
@@ -266,6 +421,23 @@ function normalizeScheduleTime(value) {
 	const minute = Number(match[2]);
 	if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return "";
 	return `${String(hour).padStart(2, "0")}:${String(Math.floor(minute / 10) * 10).padStart(2, "0")}`;
+}
+
+function normalizeColor(value) {
+	return /^#[0-9a-f]{6}$/i.test(String(value || "")) ? value : "#2f78d4";
+}
+
+function hexToRgba(hex, alpha) {
+	const normalized = normalizeColor(hex).replace("#", "");
+	const red = Number.parseInt(normalized.slice(0, 2), 16);
+	const green = Number.parseInt(normalized.slice(2, 4), 16);
+	const blue = Number.parseInt(normalized.slice(4, 6), 16);
+	return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
+function subjectAccentStyle(subject) {
+	const color = normalizeColor(subject.color);
+	return `--subject-color: ${color}; --subject-soft: ${hexToRgba(color, 0.12)}`;
 }
 
 function normalizeStudentState(value) {
@@ -350,33 +522,127 @@ function render() {
 	const todayPlans = getPlansForDates([today]);
 	const weekPlans = getPlansForDates(getWeekDates());
 	const visibleWeekPlans = filterPlans(weekPlans);
-	const todayCompleted = todayPlans.filter((plan) => plan.entry?.completed).length;
 	const rewardTotals = getRewardTotals();
 	const rewardHistoryCount = getRewardHistoryBatches().length;
 
-	els.avatar.textContent = getStudentInitial();
 	els.studentName.textContent = getStudentName();
 	els.teacherName.textContent = state.student.teacherName ? `${state.student.teacherName} 선생님` : "선생님";
-	els.accountSummary.textContent = state.student.loginId ? `학생 ID ${state.student.loginId}` : "로그인 정보를 안전하게 관리하세요.";
-	els.todayCompleteCount.textContent = `${todayCompleted} / ${todayPlans.length}`;
-	els.weekPlanCount.textContent = String(weekPlans.length);
-	els.rewardTotal.textContent = formatRewardTotal(rewardTotals);
+	els.accountSummary.textContent = state.student.loginId || "로그인 정보 없음";
 	els.rewardPageTotal.textContent = formatRewardTotal(rewardTotals);
 	els.rewardHistoryCount.textContent = String(rewardHistoryCount);
 	els.weekRange.textContent = `${formatDate(weekStart)} ~ ${formatDate(addDays(weekStart, 6))}`;
 	els.todayPlanList.innerHTML = renderPlanList(todayPlans, "오늘 학습 계획이 없습니다.", true);
-	els.weekPlanList.innerHTML = renderPlanList(visibleWeekPlans, "선택한 조건의 학습 계획이 없습니다.");
+	els.weekPlanList.innerHTML = renderWeekTable(visibleWeekPlans);
 	els.rewardHistory.innerHTML = renderRewardHistory();
+}
+
+function renderWeekTable(visiblePlans) {
+	if (!visiblePlans.length) return `<div class="empty-state">선택한 조건의 학습 계획이 없습니다.</div>`;
+
+	const dates = getWeekDates();
+	const todayKey = formatDate(new Date());
+	const planMap = new Map(visiblePlans.map((plan) => [`${plan.subject.id}__${plan.date}`, plan]));
+	const subjects = state.subjects
+		.map((subject) => ({
+			subject,
+			plans: dates.map((date) => planMap.get(`${subject.id}__${formatDate(date)}`) || null),
+		}))
+		.filter((row) => row.plans.some(shouldShowPlan));
+
+	if (!subjects.length) return `<div class="empty-state">선택한 조건의 학습 계획이 없습니다.</div>`;
+
+	const head = `
+    <thead>
+      <tr>
+        <th>과목</th>
+        <th>교재</th>
+        ${dates
+			.map((date) => {
+				const isToday = formatDate(date) === todayKey;
+				return `<th class="${isToday ? "is-today" : ""}">${displayDate(date)} ${dayNames[date.getDay()]}${isToday ? `<span class="today-column-badge">오늘</span>` : ""}</th>`;
+			})
+			.join("")}
+      </tr>
+    </thead>
+  `;
+
+	const rows = groupSubjectsByName(subjects)
+		.map((group) =>
+			group.subjects
+				.map(({ subject, plans }, groupIndex) => {
+					const cells = plans
+				.map((plan) => {
+					if (!shouldShowPlan(plan)) return `<td></td>`;
+					const entry = plan.entry;
+					const amount = entry?.amount?.trim();
+					const amountText = amount || "학습량 미입력";
+					const teacherMemo = String(entry?.memo || "").trim();
+					const completed = Boolean(entry?.completed);
+					const planned = Boolean(entry && !completed && !amount && !teacherMemo);
+					return `
+            <td>
+              <button class="entry-cell student-week-plan-cell ${entry ? "has-entry" : ""} ${completed ? "is-complete" : ""} ${planned ? "is-planned" : ""}" type="button"
+                data-start-study data-subject-id="${escapeHtml(subject.id)}" data-date="${escapeHtml(plan.date)}" data-amount="${escapeHtml(amountText)}" data-completed="${completed ? "true" : "false"}">
+                ${
+					entry
+						? `<span class="entry-status-row">
+                  ${completed ? `<span class="entry-status">완료</span>` : `<span class="entry-status pending">진행중</span>`}
+                  ${entry.rewardAwarded ? `<span class="reward-badge">+${escapeHtml(formatReward(entry.rewardAmount, entry.rewardLabel))}</span>` : ""}
+                </span>
+                ${
+					!planned
+						? `<span class="entry-amount">${amount ? escapeHtml(amount) : "학습량 없음"}</span>
+                ${teacherMemo ? `<span class="entry-memo-mark" title="${escapeHtml(teacherMemo)}">✎ 메모</span>` : ""}`
+						: ""
+				}`
+						: ""
+				}
+              </button>
+            </td>
+          `;
+				})
+				.join("");
+
+			return `
+        <tr>
+          ${
+				groupIndex === 0
+					? `<td class="subject-cell" rowspan="${group.subjects.length}" style="${escapeHtml(subjectAccentStyle(subject))}">
+            <div class="subject-name"><span class="subject-color-dot" aria-hidden="true"></span>${escapeHtml(group.name)}</div>
+          </td>`
+					: ""
+			}
+          <td class="book-cell">
+            <span class="book-title">${escapeHtml(subject.book)}</span>
+            <span class="book-schedule">${escapeHtml(normalizeScheduleTime(subject.scheduleTime) || "시간 미설정")}</span>
+          </td>
+          ${cells}
+        </tr>
+      `;
+				})
+				.join(""),
+		)
+		.join("");
+
+	return `<div class="student-week-table-wrap weekly-child-table-wrap"><table class="weekly-child-table student-week-table">${head}<tbody>${rows}</tbody></table></div>`;
 }
 
 function renderPlanList(plans, emptyText, showTeacherMemo = false) {
 	if (!plans.length) return `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
 
-	return plans
+	return [...plans]
+		.sort(comparePlanCards)
 		.map((plan) => {
 			const entry = plan.entry || {};
 			const amountText = entry.amount || "학습량 미입력";
 			const teacherMemo = String(entry.memo || "").trim();
+			const scheduleTime = normalizeScheduleTime(plan.subject.scheduleTime);
+			const titleText = [plan.subject.name, plan.subject.book, scheduleTime].filter(Boolean).join(" · ");
+			const rewardAmount = Number.parseInt(plan.subject.rewardAmount, 10) || 0;
+			const rewardInfo =
+				plan.subject.rewardEnabled && rewardAmount > 0
+					? `<p class="student-plan-reward">완료 시 보상 ${escapeHtml(formatReward(rewardAmount, plan.subject.rewardLabel || "포인트"))}</p>`
+					: "";
 			const recordItems = [
 				entry.studyStartedAt ? `시작 ${formatDateTime(entry.studyStartedAt)}` : "",
 				entry.studyDurationSeconds ? `누적 ${formatDurationSeconds(entry.studyDurationSeconds)}` : "",
@@ -395,16 +661,18 @@ function renderPlanList(plans, emptyText, showTeacherMemo = false) {
             ${recordItems.map((item) => `<p>${escapeHtml(item)}</p>`).join("")}
           </div>`
 				: "";
+			const actionArea = entry.completed
+				? ""
+				: `<button type="button" data-start-study>학습 시작</button>`;
 			return `
-      <article class="student-plan-card ${entry.completed ? "is-complete" : ""} ${plan.date === formatDate(new Date()) ? "is-today" : ""}" data-subject-id="${escapeHtml(plan.subject.id)}" data-date="${escapeHtml(plan.date)}" data-amount="${escapeHtml(amountText)}">
+      <article class="student-plan-card ${entry.completed ? "is-complete" : ""}" data-subject-id="${escapeHtml(plan.subject.id)}" data-date="${escapeHtml(plan.date)}" data-amount="${escapeHtml(amountText)}">
         <div class="student-plan-head">
           <div>
-            <strong><span class="subject-color-dot" style="background:${escapeHtml(plan.subject.color || "#2f78d4")}" aria-hidden="true"></span>${escapeHtml(plan.subject.name)} · ${escapeHtml(plan.subject.book)}</strong>
-            <p>${escapeHtml(plan.date)} ${escapeHtml(dayNames[parseDate(plan.date).getDay()])} · ${escapeHtml(normalizeScheduleTime(plan.subject.scheduleTime) || "시간 미설정")}</p>
+            <strong><span class="subject-color-dot" style="background:${escapeHtml(plan.subject.color || "#2f78d4")}" aria-hidden="true"></span>${escapeHtml(titleText)}</strong>
+            ${rewardInfo}
           </div>
           <div class="student-plan-badges">
-            ${plan.date === formatDate(new Date()) ? `<span class="today-badge">오늘</span>` : ""}
-            ${entry.completed ? `<span class="entry-status">완료</span>` : `<span class="entry-status pending">미완료</span>`}
+            ${actionArea}
             ${entry.rewardAwarded && !entry.rewardRedeemed ? `<span class="reward-badge">+${escapeHtml(formatReward(entry.rewardAmount, entry.rewardLabel))}</span>` : ""}
           </div>
         </div>
@@ -416,9 +684,6 @@ function renderPlanList(plans, emptyText, showTeacherMemo = false) {
           ${teacherMemoRow}
         </div>
         ${completedDetail}
-        <div class="student-plan-actions">
-          <button type="button" data-start-study ${entry.completed ? "disabled" : ""}>${entry.completed ? "완료됨" : "학습 시작"}</button>
-        </div>
       </article>
     `;
 		})
@@ -474,6 +739,22 @@ async function saveStudyEntry(payload) {
 	}
 }
 
+function notifyTeacherStudyEvent(eventType, study, options = {}) {
+	requestJson("/api/push/student-event", {
+		method: "POST",
+		body: JSON.stringify({
+			eventType,
+			subjectName: study.subject?.name || "",
+			bookName: study.subject?.book || "",
+			date: study.date || "",
+			amount: study.amount === "학습량 미입력" ? "" : study.amount || "",
+			feedback: options.feedback || "",
+		}),
+	}).catch((error) => {
+		console.warn("Failed to send study push event.", error);
+	});
+}
+
 function startStudy(card) {
 	const subject = state.subjects.find((item) => item.id === card.dataset.subjectId);
 	if (!subject) return;
@@ -499,6 +780,7 @@ function startStudy(card) {
 	document.body.classList.add("is-study-session-active");
 	updateStudyTimer();
 	studyTimer = window.setInterval(updateStudyTimer, 1000);
+	notifyTeacherStudyEvent("start", activeStudy);
 }
 
 function updateStudyTimer() {
@@ -528,6 +810,7 @@ async function completeStudy() {
 	const elapsed = endedAt.getTime() - activeStudy.startedAt.getTime();
 	try {
 		els.studySessionComplete.disabled = true;
+		const feedback = els.studySessionFeedback.value.trim();
 		await saveStudyEntry({
 			subjectId: activeStudy.subjectId,
 			date: activeStudy.date,
@@ -536,8 +819,9 @@ async function completeStudy() {
 			completed: true,
 			studyStartedAt: activeStudy.startedAt.toISOString(),
 			studyDurationSeconds: Math.max(1, Math.round(elapsed / 1000)),
-			studentFeedback: els.studySessionFeedback.value.trim(),
+			studentFeedback: feedback,
 		});
+		notifyTeacherStudyEvent("complete", activeStudy, { feedback });
 		closeStudySession();
 	} finally {
 		els.studySessionComplete.disabled = false;
@@ -545,12 +829,19 @@ async function completeStudy() {
 }
 
 els.logout.addEventListener("click", () => {
+	window.StudyFlowPush?.unregisterNativeAppToken(authToken).catch((error) => {
+		console.warn("Failed to unregister native push token.", error);
+	});
 	localStorage.removeItem(`${AUTH_TOKEN_KEY_PREFIX}student`);
 	localStorage.removeItem(`${AUTH_USER_KEY_PREFIX}student`);
 	localStorage.removeItem(AUTH_TOKEN_KEY);
 	localStorage.removeItem(AUTH_USER_KEY);
 	window.location.href = "./login.html";
 });
+
+if (els.pushToggle) {
+	els.pushToggle.addEventListener("click", togglePushSubscription);
+}
 
 els.prevWeek.addEventListener("click", () => {
 	weekStart = addDays(weekStart, -7);
@@ -579,7 +870,8 @@ els.navItems.forEach((item) => {
 document.addEventListener("click", (event) => {
 	const button = event.target.closest("[data-start-study]");
 	if (!button) return;
-	const card = button.closest(".student-plan-card");
+	if (button.dataset.completed === "true") return;
+	const card = button.closest(".student-plan-card, .student-week-plan-cell");
 	if (card) startStudy(card);
 });
 
@@ -591,4 +883,8 @@ els.studySessionCancel.addEventListener("click", () => {
 	closeStudySession();
 });
 
+showPage(getSavedPage());
+setupNativeBackButton();
 loadStudentState();
+refreshPushState();
+registerNativePushIfAvailable();

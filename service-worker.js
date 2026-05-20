@@ -1,4 +1,4 @@
-const CACHE_VERSION = "studyflow-v3";
+const CACHE_VERSION = "studyflow-v6";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const BASE_URL = new URL("./", self.location.href);
 const NAVIGATION_FALLBACK = new URL("offline.html", BASE_URL).pathname;
@@ -18,6 +18,7 @@ const STATIC_ASSETS = [
   "./student.js",
   "./profile.js",
   "./pwa-register.js",
+  "./push-client.js",
   "./manifest.webmanifest",
   "./assets/studyflow-icon.svg",
   "./assets/studyflow-logo.svg",
@@ -34,6 +35,39 @@ self.addEventListener("install", (event) => {
     caches.open(STATIC_CACHE)
       .then((cache) => cache.addAll(STATIC_ASSETS))
       .then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data?.json?.() || {};
+  } catch {
+    data = { body: event.data?.text?.() || "" };
+  }
+  const title = data.title || "StudyFlow";
+  const options = {
+    body: data.body || "",
+    icon: "./assets/icon-192.png",
+    badge: "./assets/icon-192.png",
+    data: {
+      url: data.url || "./"
+    }
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = new URL(event.notification.data?.url || "./", self.location.href).href;
+
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      const client = clients.find((item) => item.url === url);
+      if (client) return client.focus();
+      return self.clients.openWindow(url);
+    })
   );
 });
 

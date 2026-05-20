@@ -12,6 +12,17 @@ function applyTheme(theme) {
   document.querySelectorAll("[data-theme-toggle]").forEach((toggle) => {
     toggle.checked = nextTheme === DARK_THEME;
   });
+  document.querySelectorAll("[data-light-src][data-dark-src]").forEach((image) => {
+    const lightSrc = image.dataset.lightSrc;
+    const darkSrc = image.dataset.darkSrc;
+    const nextSrc = nextTheme === DARK_THEME ? darkSrc : lightSrc;
+    if (!nextSrc || image.getAttribute("src") === nextSrc) return;
+    image.onerror = () => {
+      image.onerror = null;
+      image.setAttribute("src", lightSrc);
+    };
+    image.setAttribute("src", nextSrc);
+  });
 }
 
 function saveTheme(theme) {

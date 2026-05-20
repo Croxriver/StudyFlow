@@ -44,6 +44,7 @@ const webEntries = [
   "student.js",
   "profile.js",
   "pwa-register.js",
+  "push-client.js",
   "service-worker.js",
   "manifest.webmanifest",
   "web.config"

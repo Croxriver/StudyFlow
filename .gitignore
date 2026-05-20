@@ -1,5 +1,6 @@
 node_modules/
 .env
+secrets/firebase-service-account.json
 dist-iis/
 *.zip
 npm-debug.log*
