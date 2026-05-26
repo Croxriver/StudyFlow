@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#2f9d62">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="스터디플로우">
+    <title>교재 등록 | StudyFlow</title>
+    <script src="./theme.js"></script>
+    <script defer src="./pwa-register.js"></script>
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" href="./assets/studyflow-icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body class="profile-page book-page">
+    <div class="profile-page-shell">
+      <header class="profile-page-head">
+        <div>
+          <div class="profile-title-row">
+            <a class="profile-title-back" href="./index.html" aria-label="스터디플로우로 돌아가기">
+              <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                <path d="M15 18 9 12l6-6"></path>
+              </svg>
+            </a>
+            <h1 id="bookPageTitle">교재 등록</h1>
+          </div>
+        </div>
+      </header>
+
+      <main class="profile-edit-layout book-edit-layout">
+        <form class="profile-edit-form book-edit-form" id="bookPageForm">
+          <section class="profile-edit-section" aria-label="교재 정보">
+            <h2>교재 정보</h2>
+            <div class="book-form-grid">
+              <label>
+                <span>학생</span>
+                <select id="bookPageChild" required></select>
+              </label>
+              <label>
+                <span>과목</span>
+                <select id="bookPageSubject" required></select>
+              </label>
+              <label class="book-form-wide">
+                <span>교재</span>
+                <input id="bookPageName" required placeholder="예: 최상위 수학 4-1">
+              </label>
+              <div class="schedule-field book-form-wide">
+                <span>수업 요일</span>
+                <div class="schedule-days book-page-schedule-days">
+                  <label><input type="checkbox" name="bookPageScheduleDay" value="월">월</label>
+                  <label><input type="checkbox" name="bookPageScheduleDay" value="화">화</label>
+                  <label><input type="checkbox" name="bookPageScheduleDay" value="수">수</label>
+                  <label><input type="checkbox" name="bookPageScheduleDay" value="목">목</label>
+                  <label><input type="checkbox" name="bookPageScheduleDay" value="금">금</label>
+                  <label><input type="checkbox" name="bookPageScheduleDay" value="토">토</label>
+                  <label><input type="checkbox" name="bookPageScheduleDay" value="일">일</label>
+                </div>
+              </div>
+              <label>
+                <span>수업 시간</span>
+                <div class="time-select-group">
+                  <select id="bookPageScheduleHour" aria-label="수업 시간 시"></select>
+                  <select id="bookPageScheduleMinute" aria-label="수업 시간 분"></select>
+                </div>
+              </label>
+              <label>
+                <span>최소 학습 시간</span>
+                <select id="bookPageMinimumStudyMinutes"></select>
+              </label>
+              <div class="date-pair book-form-wide">
+                <label>
+                  <span>교재 시작일</span>
+                  <input id="bookPageStartDate" type="date">
+                </label>
+                <label>
+                  <span>교재 종료일</span>
+                  <input id="bookPageEndDate" type="date">
+                </label>
+              </div>
+              <label class="auto-plan-check book-form-wide">
+                <input id="bookPageAutoPlan" type="checkbox">
+                <span id="bookPageAutoPlanText">기간과 요일에 맞춰 가계획 자동 생성</span>
+              </label>
+              <div class="reward-option book-form-wide">
+              <label class="auto-plan-check">
+                <input id="bookPageRewardEnabled" type="checkbox">
+                <span>학습 완료 시 보상 누적</span>
+              </label>
+              <div class="reward-fields" id="bookPageRewardFields" hidden>
+                <label>
+                  <span>보상</span>
+                  <input id="bookPageRewardAmount" type="number" min="0" step="1" placeholder="예: 1">
+                </label>
+                <label>
+                  <span>단위</span>
+                  <input id="bookPageRewardLabel" maxlength="20" placeholder="예: 포인트, 스티커">
+                </label>
+              </div>
+            </div>
+            <div class="profile-edit-actions book-form-wide">
+              <button type="submit" id="bookPageSubmit">등록</button>
+            </div>
+            </div>
+          </section>
+        </form>
+      </main>
+    </div>
+    <div class="profile-toast" id="bookPageToast" role="status" aria-live="polite"></div>
+
+    <script src="./book.js"></script>
+  </body>
+</html>

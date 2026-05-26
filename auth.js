@@ -2,6 +2,9 @@
 const AUTH_USER_KEY = "local-study-manager-user";
 const AUTH_TOKEN_KEY_PREFIX = `${AUTH_TOKEN_KEY}:`;
 const AUTH_USER_KEY_PREFIX = `${AUTH_USER_KEY}:`;
+const TEACHER_LOGIN_STARTUP_KEY_PREFIX = "studyflow-teacher-login-startup:";
+const ACCESS_LOG_SKIP_KEY_PREFIX = "studyflow-access-log-skip:";
+const APP_LOCK_SKIP_KEY_PREFIX = "studyflow-app-lock-skip:";
 
 const form = document.querySelector("[data-auth-form]");
 const message = document.querySelector("[data-auth-message]");
@@ -116,7 +119,10 @@ function lockVerificationTarget(input, button, seconds = 60) {
 async function requestAuth(path, payload) {
 	const response = await fetch(path, {
 		method: "POST",
-		headers: { "Content-Type": "application/json" },
+		headers: {
+			"Content-Type": "application/json",
+			...getClientHeaders(),
+		},
 		body: JSON.stringify(payload),
 	});
 	const contentType = response.headers.get("content-type") || "";
@@ -132,6 +138,21 @@ async function requestAuth(path, payload) {
 	return data;
 }
 
+function getClientHeaders() {
+	if (!isNativeApp()) return {};
+	return {
+		"X-StudyFlow-Client": "mobile-app",
+		"X-StudyFlow-Platform": window.Capacitor?.getPlatform?.() || "app",
+	};
+}
+
+function isNativeApp() {
+	if (typeof window.Capacitor?.isNativePlatform === "function") {
+		return window.Capacitor.isNativePlatform();
+	}
+	return ["android", "ios"].includes(window.Capacitor?.getPlatform?.());
+}
+
 function saveSession(data) {
 	if (!data?.token || !data?.user?.role) {
 		throw new Error("로그인 응답이 올바르지 않습니다. 서버 API 연결을 확인하세요.");
@@ -142,6 +163,27 @@ function saveSession(data) {
 	localStorage.setItem(`${AUTH_USER_KEY_PREFIX}${role}`, JSON.stringify(data.user));
 	localStorage.removeItem(AUTH_TOKEN_KEY);
 	localStorage.removeItem(AUTH_USER_KEY);
+}
+
+function markTeacherLoginStartup(user) {
+	if (user?.role !== "teacher") return;
+	try {
+		sessionStorage.setItem(`${TEACHER_LOGIN_STARTUP_KEY_PREFIX}${user.id || user.email || "anonymous"}`, "1");
+	} catch {}
+}
+
+function markAccessLogSkip(user) {
+	if (!user?.role) return;
+	try {
+		sessionStorage.setItem(`${ACCESS_LOG_SKIP_KEY_PREFIX}${user.role}:${user.id || user.email || user.loginId || "anonymous"}`, String(Date.now()));
+	} catch {}
+}
+
+function markAppLockSkip(user) {
+	if (!user?.role) return;
+	try {
+		sessionStorage.setItem(`${APP_LOCK_SKIP_KEY_PREFIX}${user.role}:${user.id || user.email || user.loginId || "anonymous"}`, String(Date.now()));
+	} catch {}
 }
 
 function migrateLegacySession() {
@@ -183,6 +225,9 @@ async function submitLogin(event) {
 				});
 
 	saveSession(result);
+	markTeacherLoginStartup(result.user);
+	markAccessLogSkip(result.user);
+	markAppLockSkip(result.user);
 	window.location.replace(result.user?.role === "student" ? "./student.html" : "./index.html");
 }
 

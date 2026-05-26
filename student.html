@@ -136,6 +136,8 @@
                 <p class="form-message" id="studentPushMessage" role="status" aria-live="polite"></p>
               </section>
 
+              <section class="profile-panel student-setting-panel app-lock-settings-panel" id="studentAppLockSettings" aria-label="화면 잠금"></section>
+
             </div>
           </section>
         </section>
@@ -145,8 +147,11 @@
     <section class="study-session-screen" id="studySessionScreen" hidden aria-live="polite">
       <div class="study-session-panel">
         <img class="study-session-logo" src="./assets/logo_text.svg" data-light-src="./assets/logo_text.svg" data-dark-src="./assets/logo_text_light.svg" alt="StudyFlow 스터디플로우">
-        <div class="study-session-progress" id="studySessionProgress" aria-hidden="true">
-          <div class="study-session-progress-inner"></div>
+        <div class="study-session-progress" id="studySessionProgress" aria-label="학습 타이머">
+          <div class="study-session-progress-inner">
+            <span id="studySessionTimerLabel">학습 시간</span>
+            <strong id="studySessionTimerValue">00:00:00</strong>
+          </div>
         </div>
         <div class="study-session-copy">
           <p class="eyebrow">Study in progress</p>
@@ -169,8 +174,12 @@
             <strong id="studySessionStartTime">--:--</strong>
           </article>
           <article>
-            <span>현재 누적 시간</span>
+            <span id="studySessionElapsedLabel">현재 누적 시간</span>
             <strong id="studySessionElapsed">00:00:00</strong>
+          </article>
+          <article id="studySessionRemainingCard" hidden>
+            <span>남은 시간</span>
+            <strong id="studySessionRemaining">00:00</strong>
           </article>
         </div>
         <label class="study-session-feedback">
@@ -192,6 +201,7 @@
     </nav>
 
     <script src="./push-client.js"></script>
+    <script src="./app-lock.js"></script>
     <script src="./student.js"></script>
   </body>
 </html>

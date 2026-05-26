@@ -6,6 +6,9 @@ const PAGE_STORAGE_KEY = "studyflow-student-active-page";
 const authSession = getSessionForRole("student");
 const authToken = authSession.token;
 const authUser = authSession.user;
+const ACCESS_LOG_SKIP_KEY = `studyflow-access-log-skip:student:${authUser.id || authUser.loginId || "anonymous"}`;
+const ACCESS_LOG_SKIP_TTL_MS = 3000;
+const ACCESS_LOG_THROTTLE_MS = 5000;
 
 if (!authToken) {
 	window.location.replace("./login.html");
@@ -24,6 +27,7 @@ let activePage = "today";
 let activeStudy = null;
 let studyTimer = null;
 let pushState = { supported: false, subscribed: false, permission: "default" };
+let lastAccessLogAt = 0;
 
 const els = {
 	pageViews: document.querySelectorAll(".page-view"),
@@ -34,6 +38,7 @@ const els = {
 	pushStatus: document.querySelector("#studentPushStatus"),
 	pushToggle: document.querySelector("#studentPushToggle"),
 	pushMessage: document.querySelector("#studentPushMessage"),
+	appLockSettings: document.querySelector("#studentAppLockSettings"),
 	topbarThemeSlot: document.querySelector("#studentTopbarThemeSlot"),
 	logout: document.querySelector("#studentLogout"),
 	rewardPageTotal: document.querySelector("#studentRewardPageTotal"),
@@ -48,13 +53,18 @@ const els = {
 	rewardHistory: document.querySelector("#studentRewardHistory"),
 	studySessionScreen: document.querySelector("#studySessionScreen"),
 	studySessionProgress: document.querySelector("#studySessionProgress"),
+	studySessionTimerLabel: document.querySelector("#studySessionTimerLabel"),
+	studySessionTimerValue: document.querySelector("#studySessionTimerValue"),
 	studySessionTitle: document.querySelector("#studySessionTitle"),
 	studySessionMeta: document.querySelector("#studySessionMeta"),
 	studySessionAmount: document.querySelector("#studySessionAmount"),
 	studySessionTeacherNoteRow: document.querySelector("#studySessionTeacherNoteRow"),
 	studySessionTeacherNote: document.querySelector("#studySessionTeacherNote"),
 	studySessionStartTime: document.querySelector("#studySessionStartTime"),
+	studySessionElapsedLabel: document.querySelector("#studySessionElapsedLabel"),
 	studySessionElapsed: document.querySelector("#studySessionElapsed"),
+	studySessionRemainingCard: document.querySelector("#studySessionRemainingCard"),
+	studySessionRemaining: document.querySelector("#studySessionRemaining"),
 	studySessionFeedback: document.querySelector("#studySessionFeedback"),
 	studySessionComplete: document.querySelector("#studySessionComplete"),
 	studySessionCancel: document.querySelector("#studySessionCancel"),
@@ -104,6 +114,65 @@ function parseStoredUser(value) {
 
 function setStatus(text, isError = false) {
 	if (isError) console.warn(`[StudyFlow Student] ${text}`);
+}
+
+function consumeAccessLogSkip() {
+	try {
+		const value = sessionStorage.getItem(ACCESS_LOG_SKIP_KEY);
+		if (!value) return false;
+		sessionStorage.removeItem(ACCESS_LOG_SKIP_KEY);
+		const createdAt = Number(value) || 0;
+		return createdAt > 0 && Date.now() - createdAt <= ACCESS_LOG_SKIP_TTL_MS;
+	} catch {
+		return false;
+	}
+}
+
+async function recordStartupAccessLog() {
+	const now = Date.now();
+	if (consumeAccessLogSkip()) {
+		lastAccessLogAt = now;
+		return;
+	}
+	if (now - lastAccessLogAt < ACCESS_LOG_THROTTLE_MS) return;
+	lastAccessLogAt = now;
+	try {
+		const response = await fetch("/api/auth/access-log", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${authToken}`,
+				...getClientHeaders(),
+			},
+		});
+		if (response.status === 401) {
+			localStorage.removeItem(`${AUTH_TOKEN_KEY_PREFIX}student`);
+			localStorage.removeItem(`${AUTH_USER_KEY_PREFIX}student`);
+			window.location.replace("./login.html");
+			return;
+		}
+		if (!response.ok) console.warn("Failed to record startup access log.");
+	} catch (error) {
+		console.warn("Failed to record startup access log.", error);
+	}
+}
+
+function getClientHeaders() {
+	if (!window.StudyFlowPush?.isNativeApp?.()) return {};
+	return {
+		"X-StudyFlow-Client": "mobile-app",
+		"X-StudyFlow-Platform": window.Capacitor?.getPlatform?.() || "app",
+	};
+}
+
+function setupNativeAccessLogEvents() {
+	const appPlugin = window.Capacitor?.Plugins?.App;
+	if (!appPlugin?.addListener || !window.StudyFlowPush?.isNativeApp?.()) return;
+	appPlugin.addListener("resume", () => {
+		recordStartupAccessLog();
+	});
+	appPlugin.addListener("appStateChange", (state) => {
+		if (state?.isActive) recordStartupAccessLog();
+	});
 }
 
 function getPushStatusText() {
@@ -225,6 +294,10 @@ function setupNativeBackButton() {
 	if (!isNativeApp() || !appPlugin?.addListener) return;
 
 	appPlugin.addListener("backButton", () => {
+		if (window.StudyFlowAppLock?.isLocked?.()) {
+			appPlugin.exitApp();
+			return;
+		}
 		if (!els.studySessionScreen.hidden) {
 			closeStudySession();
 			return;
@@ -388,6 +461,7 @@ function formatClockTime(date) {
 	return new Intl.DateTimeFormat("ko-KR", {
 		hour: "2-digit",
 		minute: "2-digit",
+		hour12: false,
 	}).format(date);
 }
 
@@ -397,6 +471,13 @@ function formatElapsed(ms) {
 	const minutes = Math.floor((totalSeconds % 3600) / 60);
 	const seconds = totalSeconds % 60;
 	return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
+}
+
+function formatTimerShort(ms) {
+	const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+	const minutes = Math.floor(totalSeconds / 60);
+	const seconds = totalSeconds % 60;
+	return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 function formatDurationText(ms) {
@@ -423,6 +504,29 @@ function normalizeScheduleTime(value) {
 	return `${String(hour).padStart(2, "0")}:${String(Math.floor(minute / 10) * 10).padStart(2, "0")}`;
 }
 
+function normalizeMinimumStudyMinutes(value) {
+	const minutes = Number.parseInt(value, 10) || 0;
+	if (minutes === 0) return 0;
+	if (minutes < 10 || minutes > 120) return 0;
+	return Math.floor(minutes / 10) * 10;
+}
+
+function formatMinimumStudyMinutes(value) {
+	const minutes = normalizeMinimumStudyMinutes(value);
+	if (!minutes) return "";
+	const hours = Math.floor(minutes / 60);
+	const rest = minutes % 60;
+	if (hours && rest) return `${hours}시간 ${rest}분`;
+	if (hours) return `${hours}시간`;
+	return `${rest}분`;
+}
+
+function getEffectiveMinimumStudyMinutes(entry, subject) {
+	const entryMinutes = normalizeMinimumStudyMinutes(entry?.minimumStudyMinutes ?? entry?.minimum_study_minutes);
+	if (entryMinutes) return entryMinutes;
+	return normalizeMinimumStudyMinutes(subject?.minimumStudyMinutes ?? subject?.minimum_study_minutes);
+}
+
 function normalizeColor(value) {
 	return /^#[0-9a-f]{6}$/i.test(String(value || "")) ? value : "#2f78d4";
 }
@@ -441,19 +545,36 @@ function subjectAccentStyle(subject) {
 }
 
 function normalizeStudentState(value) {
+	const subjects = Array.isArray(value?.subjects)
+		? value.subjects.map((subject) => ({
+				...subject,
+				subjectSettingId: subject.subjectSettingId ?? subject.subject_setting_id ?? "",
+				scheduleDays: Array.isArray(subject.scheduleDays) ? subject.scheduleDays : subject.schedule_days || [],
+				scheduleTime: normalizeScheduleTime(subject.scheduleTime ?? subject.schedule_time),
+				minimumStudyMinutes: normalizeMinimumStudyMinutes(subject.minimumStudyMinutes ?? subject.minimum_study_minutes),
+				startDate: subject.startDate ?? subject.start_date ?? "",
+				endDate: subject.endDate ?? subject.end_date ?? "",
+			}))
+		: [];
+	const subjectsById = new Map(subjects.map((subject) => [subject.id, subject]));
+
 	return {
 		...value,
-		subjects: Array.isArray(value?.subjects)
-			? value.subjects.map((subject) => ({
-					...subject,
-					subjectSettingId: subject.subjectSettingId ?? subject.subject_setting_id ?? "",
-					scheduleDays: Array.isArray(subject.scheduleDays) ? subject.scheduleDays : subject.schedule_days || [],
-					scheduleTime: normalizeScheduleTime(subject.scheduleTime ?? subject.schedule_time),
-					startDate: subject.startDate ?? subject.start_date ?? "",
-					endDate: subject.endDate ?? subject.end_date ?? "",
-				}))
-			: [],
-		entries: value?.entries && typeof value.entries === "object" ? value.entries : {},
+		subjects,
+		entries:
+			value?.entries && typeof value.entries === "object"
+				? Object.fromEntries(
+						Object.entries(value.entries).map(([key, entry]) => [
+							key,
+							{
+								...entry,
+								minimumStudyMinutes:
+									normalizeMinimumStudyMinutes(entry.minimumStudyMinutes ?? entry.minimum_study_minutes) ||
+									normalizeMinimumStudyMinutes(subjectsById.get(String(entry.subjectId))?.minimumStudyMinutes),
+							},
+						]),
+					)
+				: {},
 	};
 }
 
@@ -534,6 +655,7 @@ function render() {
 	els.todayPlanList.innerHTML = renderPlanList(todayPlans, "오늘 학습 계획이 없습니다.", true);
 	els.weekPlanList.innerHTML = renderWeekTable(visibleWeekPlans);
 	els.rewardHistory.innerHTML = renderRewardHistory();
+	window.StudyFlowAppLock?.renderSettings(els.appLockSettings);
 }
 
 function renderWeekTable(visiblePlans) {
@@ -579,10 +701,11 @@ function renderWeekTable(visiblePlans) {
 					const teacherMemo = String(entry?.memo || "").trim();
 					const completed = Boolean(entry?.completed);
 					const planned = Boolean(entry && !completed && !amount && !teacherMemo);
+					const minimumStudyMinutes = getEffectiveMinimumStudyMinutes(entry, subject);
 					return `
             <td>
               <button class="entry-cell student-week-plan-cell ${entry ? "has-entry" : ""} ${completed ? "is-complete" : ""} ${planned ? "is-planned" : ""}" type="button"
-                data-start-study data-subject-id="${escapeHtml(subject.id)}" data-date="${escapeHtml(plan.date)}" data-amount="${escapeHtml(amountText)}" data-completed="${completed ? "true" : "false"}">
+                data-start-study data-subject-id="${escapeHtml(subject.id)}" data-date="${escapeHtml(plan.date)}" data-amount="${escapeHtml(amountText)}" data-minimum-study-minutes="${minimumStudyMinutes}" data-completed="${completed ? "true" : "false"}">
                 ${
 					entry
 						? `<span class="entry-status-row">
@@ -637,7 +760,12 @@ function renderPlanList(plans, emptyText, showTeacherMemo = false) {
 			const amountText = entry.amount || "학습량 미입력";
 			const teacherMemo = String(entry.memo || "").trim();
 			const scheduleTime = normalizeScheduleTime(plan.subject.scheduleTime);
-			const titleText = [plan.subject.name, plan.subject.book, scheduleTime].filter(Boolean).join(" · ");
+			const minimumStudyMinutes = getEffectiveMinimumStudyMinutes(plan.entry, plan.subject);
+			const scheduleText = scheduleTime || "시간 미설정";
+			const titleText = [plan.subject.name, plan.subject.book].filter(Boolean).join(" · ");
+			const minimumStudyBadge = minimumStudyMinutes
+				? `<span class="student-plan-minimum"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>최소 ${escapeHtml(formatMinimumStudyMinutes(minimumStudyMinutes))}</span>`
+				: "";
 			const rewardAmount = Number.parseInt(plan.subject.rewardAmount, 10) || 0;
 			const rewardInfo =
 				plan.subject.rewardEnabled && rewardAmount > 0
@@ -663,12 +791,13 @@ function renderPlanList(plans, emptyText, showTeacherMemo = false) {
 				: "";
 			const actionArea = entry.completed
 				? ""
-				: `<button type="button" data-start-study>학습 시작</button>`;
+				: `<button type="button" data-start-study data-subject-id="${escapeHtml(plan.subject.id)}" data-date="${escapeHtml(plan.date)}" data-amount="${escapeHtml(amountText)}" data-minimum-study-minutes="${minimumStudyMinutes}">학습 시작</button>`;
 			return `
-      <article class="student-plan-card ${entry.completed ? "is-complete" : ""}" data-subject-id="${escapeHtml(plan.subject.id)}" data-date="${escapeHtml(plan.date)}" data-amount="${escapeHtml(amountText)}">
+      <article class="student-plan-card ${entry.completed ? "is-complete" : ""}" data-subject-id="${escapeHtml(plan.subject.id)}" data-date="${escapeHtml(plan.date)}" data-amount="${escapeHtml(amountText)}" data-minimum-study-minutes="${minimumStudyMinutes}">
         <div class="student-plan-head">
           <div>
             <strong><span class="subject-color-dot" style="background:${escapeHtml(plan.subject.color || "#2f78d4")}" aria-hidden="true"></span>${escapeHtml(titleText)}</strong>
+            <p class="student-plan-schedule"><span>수업 시간 ${escapeHtml(scheduleText)}</span>${minimumStudyBadge}</p>
             ${rewardInfo}
           </div>
           <div class="student-plan-badges">
@@ -769,13 +898,21 @@ function startStudy(card) {
 		memo: teacherMemo,
 		startedAt: new Date(),
 	};
+	activeStudy.minimumStudyMinutes = normalizeMinimumStudyMinutes(card.dataset.minimumStudyMinutes || getEffectiveMinimumStudyMinutes(entry, subject));
 	els.studySessionTitle.textContent = `${subject.name} · ${subject.book}`;
-	els.studySessionMeta.textContent = `${activeStudy.date} ${dayNames[parseDate(activeStudy.date).getDay()]} · ${normalizeScheduleTime(subject.scheduleTime) || "시간 미설정"}`;
+	els.studySessionMeta.textContent = [
+		`${activeStudy.date} ${dayNames[parseDate(activeStudy.date).getDay()]}`,
+		normalizeScheduleTime(subject.scheduleTime) || "시간 미설정",
+		activeStudy.minimumStudyMinutes ? `최소 ${formatMinimumStudyMinutes(activeStudy.minimumStudyMinutes)}` : "",
+	]
+		.filter(Boolean)
+		.join(" · ");
 	els.studySessionAmount.textContent = activeStudy.amount;
 	els.studySessionTeacherNote.textContent = teacherMemo;
 	els.studySessionTeacherNoteRow.hidden = !teacherMemo;
 	els.studySessionStartTime.textContent = formatClockTime(activeStudy.startedAt);
 	els.studySessionFeedback.value = "";
+	els.studySessionComplete.disabled = activeStudy.minimumStudyMinutes > 0;
 	els.studySessionScreen.hidden = false;
 	document.body.classList.add("is-study-session-active");
 	updateStudyTimer();
@@ -786,8 +923,31 @@ function startStudy(card) {
 function updateStudyTimer() {
 	if (!activeStudy) return;
 	const elapsed = Date.now() - activeStudy.startedAt.getTime();
+	const minimumMs = normalizeMinimumStudyMinutes(activeStudy.minimumStudyMinutes) * 60000;
+	const remaining = Math.max(0, minimumMs - elapsed);
+	const hasMinimum = minimumMs > 0;
+
 	els.studySessionElapsed.textContent = formatElapsed(elapsed);
-	els.studySessionProgress.style.setProperty("--progress", `${Math.min(360, (Math.floor(elapsed / 1000) % 60) * 6)}deg`);
+	els.studySessionElapsedLabel.textContent = hasMinimum ? "학습 시간" : "현재 누적 시간";
+	els.studySessionRemainingCard.hidden = !hasMinimum;
+	els.studySessionTimerLabel.textContent = hasMinimum ? "남은 시간" : "학습 시간";
+	els.studySessionTimerValue.textContent = hasMinimum ? formatTimerShort(remaining) : formatElapsed(elapsed);
+	if (els.studySessionRemaining) {
+		els.studySessionRemaining.textContent = formatTimerShort(remaining);
+	}
+	if (hasMinimum) {
+		const progress = Math.min(360, Math.max(0, (elapsed / minimumMs) * 360));
+		els.studySessionProgress.classList.remove("is-spinner");
+		els.studySessionProgress.classList.add("is-countdown");
+		els.studySessionProgress.classList.toggle("is-ready", remaining <= 0);
+		els.studySessionProgress.style.setProperty("--progress", `${progress}deg`);
+		els.studySessionComplete.disabled = remaining > 0;
+	} else {
+		els.studySessionProgress.classList.remove("is-countdown", "is-ready");
+		els.studySessionProgress.classList.add("is-spinner");
+		els.studySessionProgress.style.setProperty("--progress", "360deg");
+		els.studySessionComplete.disabled = false;
+	}
 }
 
 function stopStudyTimer() {
@@ -801,6 +961,8 @@ function closeStudySession() {
 	stopStudyTimer();
 	activeStudy = null;
 	els.studySessionScreen.hidden = true;
+	els.studySessionComplete.disabled = false;
+	els.studySessionProgress.classList.remove("is-countdown", "is-ready", "is-spinner");
 	document.body.classList.remove("is-study-session-active");
 }
 
@@ -808,6 +970,11 @@ async function completeStudy() {
 	if (!activeStudy) return;
 	const endedAt = new Date();
 	const elapsed = endedAt.getTime() - activeStudy.startedAt.getTime();
+	const minimumMs = normalizeMinimumStudyMinutes(activeStudy.minimumStudyMinutes) * 60000;
+	if (minimumMs > 0 && elapsed < minimumMs) {
+		alert(`최소 학습 시간 ${formatMinimumStudyMinutes(activeStudy.minimumStudyMinutes)} 이후 완료할 수 있습니다.`);
+		return;
+	}
 	try {
 		els.studySessionComplete.disabled = true;
 		const feedback = els.studySessionFeedback.value.trim();
@@ -825,6 +992,7 @@ async function completeStudy() {
 		closeStudySession();
 	} finally {
 		els.studySessionComplete.disabled = false;
+		updateStudyTimer();
 	}
 }
 
@@ -841,6 +1009,17 @@ els.logout.addEventListener("click", () => {
 
 if (els.pushToggle) {
 	els.pushToggle.addEventListener("click", togglePushSubscription);
+}
+
+if (els.appLockSettings) {
+	els.appLockSettings.addEventListener("click", (event) => {
+		window.StudyFlowAppLock?.handleSettingsClick(event, () => window.StudyFlowAppLock?.renderSettings(els.appLockSettings));
+	});
+	els.appLockSettings.addEventListener("change", (event) => {
+		if (window.StudyFlowAppLock?.handleSettingsChange(event)) {
+			window.StudyFlowAppLock?.renderSettings(els.appLockSettings);
+		}
+	});
 }
 
 els.prevWeek.addEventListener("click", () => {
@@ -885,6 +1064,15 @@ els.studySessionCancel.addEventListener("click", () => {
 
 showPage(getSavedPage());
 setupNativeBackButton();
+setupNativeAccessLogEvents();
+window.StudyFlowAppLock?.init({
+	role: "student",
+	accountId: authUser.id || authUser.loginId || "anonymous",
+	accountName: authUser.name || authUser.loginId || "StudyFlow",
+	isNativeApp,
+	onLogout: () => els.logout.click(),
+});
+recordStartupAccessLog();
 loadStudentState();
 refreshPushState();
 registerNativePushIfAvailable();

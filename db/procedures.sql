@@ -24,6 +24,10 @@ IF COL_LENGTH('dbo.books', 'reward_label') IS NULL
   ALTER TABLE dbo.books ADD reward_label NVARCHAR(50) NULL;
 GO
 
+IF COL_LENGTH('dbo.books', 'minimum_study_minutes') IS NULL
+  ALTER TABLE dbo.books ADD minimum_study_minutes INT NOT NULL CONSTRAINT DF_books_minimum_study_minutes DEFAULT (0) WITH VALUES;
+GO
+
 IF COL_LENGTH('dbo.study_entries', 'reward_awarded') IS NULL
   ALTER TABLE dbo.study_entries ADD reward_awarded BIT NOT NULL CONSTRAINT DF_study_entries_reward_awarded DEFAULT (0) WITH VALUES;
 GO
@@ -58,6 +62,36 @@ GO
 
 IF COL_LENGTH('dbo.study_entries', 'student_feedback') IS NULL
   ALTER TABLE dbo.study_entries ADD student_feedback NVARCHAR(1000) NULL;
+GO
+
+IF COL_LENGTH('dbo.study_entries', 'minimum_study_minutes') IS NULL
+  ALTER TABLE dbo.study_entries ADD minimum_study_minutes INT NOT NULL CONSTRAINT DF_study_entries_minimum_study_minutes DEFAULT (0) WITH VALUES;
+GO
+
+IF COL_LENGTH('dbo.children', 'phone') IS NULL
+  ALTER TABLE dbo.children ADD phone NVARCHAR(30) NULL;
+GO
+
+IF COL_LENGTH('dbo.children', 'parent_phone') IS NULL
+  ALTER TABLE dbo.children ADD parent_phone NVARCHAR(30) NULL;
+GO
+
+IF OBJECT_ID('dbo.access_logs', 'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.access_logs (
+    id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_access_logs PRIMARY KEY,
+    user_id UNIQUEIDENTIFIER NULL,
+    child_id UNIQUEIDENTIFIER NULL,
+    role NVARCHAR(20) NOT NULL,
+    login_id NVARCHAR(255) NULL,
+    ip_address NVARCHAR(64) NULL,
+    user_agent NVARCHAR(500) NULL,
+    created_at DATETIME2(0) NOT NULL CONSTRAINT DF_access_logs_created_at DEFAULT SYSUTCDATETIME()
+  );
+
+  CREATE INDEX IX_access_logs_created_at ON dbo.access_logs(created_at DESC);
+  CREATE INDEX IX_access_logs_user_role ON dbo.access_logs(user_id, child_id, role, created_at DESC);
+END;
 GO
 
 IF OBJECT_ID('dbo.push_subscriptions', 'U') IS NULL
@@ -494,6 +528,48 @@ BEGIN
 END;
 GO
 
+CREATE OR ALTER PROCEDURE dbo.app_create_access_log
+  @user_id UNIQUEIDENTIFIER = NULL,
+  @child_id UNIQUEIDENTIFIER = NULL,
+  @role NVARCHAR(20),
+  @login_id NVARCHAR(255) = NULL,
+  @ip_address NVARCHAR(64) = NULL,
+  @user_agent NVARCHAR(500) = NULL
+AS
+BEGIN
+  SET NOCOUNT ON;
+
+  DELETE FROM dbo.access_logs
+  WHERE created_at < DATEADD(MONTH, -6, SYSUTCDATETIME());
+
+  INSERT INTO dbo.access_logs (user_id, child_id, role, login_id, ip_address, user_agent)
+  VALUES (@user_id, @child_id, @role, NULLIF(@login_id, ''), NULLIF(@ip_address, ''), NULLIF(@user_agent, ''));
+END;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.app_get_access_logs
+  @user_id UNIQUEIDENTIFIER,
+  @limit INT = 30
+AS
+BEGIN
+  SET NOCOUNT ON;
+
+  DELETE FROM dbo.access_logs
+  WHERE created_at < DATEADD(MONTH, -6, SYSUTCDATETIME());
+
+  SELECT TOP (CASE WHEN @limit BETWEEN 1 AND 100 THEN @limit ELSE 30 END)
+    id,
+    role,
+    login_id AS loginId,
+    ip_address AS ipAddress,
+    user_agent AS userAgent,
+    created_at AS createdAt
+  FROM dbo.access_logs
+  WHERE user_id = @user_id AND child_id IS NULL AND role = N'teacher'
+  ORDER BY created_at DESC, id DESC;
+END;
+GO
+
 CREATE OR ALTER PROCEDURE dbo.app_reset_user_password
   @email NVARCHAR(255),
   @name NVARCHAR(100),
@@ -560,6 +636,8 @@ BEGIN
     id,
     name,
     birth_month AS birthMonth,
+    phone,
+    parent_phone AS parentPhone,
     login_id AS loginId
   FROM dbo.children
   WHERE user_id = @user_id
@@ -581,6 +659,7 @@ BEGIN
     ss.name AS subjectName,
     b.name AS book,
     b.schedule_time AS scheduleTime,
+    b.minimum_study_minutes AS minimumStudyMinutes,
     b.start_date AS startDate,
     b.end_date AS endDate,
     b.reward_enabled AS rewardEnabled,
@@ -605,6 +684,7 @@ BEGIN
     c.name AS childName,
     se.study_date AS studyDate,
     se.amount,
+    se.minimum_study_minutes AS minimumStudyMinutes,
     se.memo,
     se.completed,
     se.reward_awarded AS rewardAwarded,
@@ -646,11 +726,20 @@ BEGIN
     password_hash NVARCHAR(255) NULL
   );
 
+  DECLARE @existing_books TABLE (
+    id UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+    child_id UNIQUEIDENTIFIER NOT NULL,
+    subject_setting_id UNIQUEIDENTIFIER NOT NULL,
+    name NVARCHAR(200) NOT NULL,
+    minimum_study_minutes INT NOT NULL
+  );
+
   DECLARE @existing_entries TABLE (
     child_id UNIQUEIDENTIFIER NOT NULL,
     book_id UNIQUEIDENTIFIER NOT NULL,
     study_date DATE NOT NULL,
     amount NVARCHAR(200) NULL,
+    minimum_study_minutes INT NOT NULL,
     memo NVARCHAR(1000) NULL,
     completed BIT NOT NULL,
     reward_awarded BIT NOT NULL,
@@ -669,13 +758,19 @@ BEGIN
   FROM dbo.children
   WHERE user_id = @user_id;
 
+  INSERT INTO @existing_books (id, child_id, subject_setting_id, name, minimum_study_minutes)
+  SELECT id, child_id, subject_setting_id, name, minimum_study_minutes
+  FROM dbo.books
+  WHERE user_id = @user_id;
+
   INSERT INTO @existing_entries
-    (child_id, book_id, study_date, amount, memo, completed, reward_awarded, reward_amount, reward_label, reward_redeemed, reward_redeemed_at, study_started_at, study_duration_seconds, student_feedback, updated_at)
+    (child_id, book_id, study_date, amount, minimum_study_minutes, memo, completed, reward_awarded, reward_amount, reward_label, reward_redeemed, reward_redeemed_at, study_started_at, study_duration_seconds, student_feedback, updated_at)
   SELECT
     child_id,
     book_id,
     study_date,
     amount,
+    minimum_study_minutes,
     memo,
     completed,
     reward_awarded,
@@ -730,12 +825,14 @@ BEGIN
   DELETE FROM dbo.subject_settings WHERE user_id = @user_id;
   DELETE FROM dbo.children WHERE user_id = @user_id;
 
-  INSERT INTO dbo.children (id, user_id, name, birth_month, login_id, password_hash, sort_order)
+  INSERT INTO dbo.children (id, user_id, name, birth_month, phone, parent_phone, login_id, password_hash, sort_order)
   SELECT
     child.id,
     @user_id,
     child.name,
     TRY_CONVERT(date, NULLIF(child.birthMonth, '')),
+    NULLIF(child.phone, ''),
+    NULLIF(child.parentPhone, ''),
     CASE
       WHEN NULLIF(existingById.login_id, '') IS NOT NULL THEN existingById.login_id
       ELSE NULLIF(child.loginId, '')
@@ -748,6 +845,8 @@ BEGIN
     id UNIQUEIDENTIFIER '$.id',
     name NVARCHAR(100) '$.name',
     birthMonth NVARCHAR(10) '$.birthMonth',
+    phone NVARCHAR(30) '$.phone',
+    parentPhone NVARCHAR(30) '$.parentPhone',
     loginId NVARCHAR(100) '$.loginId',
     passwordHash NVARCHAR(255) '$.passwordHash'
   ) child
@@ -777,6 +876,8 @@ BEGIN
     subject_setting_id UNIQUEIDENTIFIER NOT NULL,
     name NVARCHAR(200) NOT NULL,
     schedule_time NVARCHAR(5) NULL,
+    minimum_study_minutes INT NOT NULL,
+    minimum_study_minutes_source NVARCHAR(30) NULL,
     start_date NVARCHAR(10) NULL,
     end_date NVARCHAR(10) NULL,
     reward_enabled BIT NOT NULL,
@@ -786,13 +887,20 @@ BEGIN
   );
 
   INSERT INTO @books
-    (id, child_id, subject_setting_id, name, schedule_time, start_date, end_date, reward_enabled, reward_amount, reward_label, schedule_days)
+    (id, child_id, subject_setting_id, name, schedule_time, minimum_study_minutes, minimum_study_minutes_source, start_date, end_date, reward_enabled, reward_amount, reward_label, schedule_days)
   SELECT
     book.id,
     TRY_CONVERT(uniqueidentifier, book.childId),
     book.subjectSettingId,
     book.book,
     NULLIF(book.scheduleTime, ''),
+    CASE
+      WHEN book.minimumStudyMinutes IS NULL THEN COALESCE(existing.minimum_study_minutes, existingByBook.minimum_study_minutes, 0)
+      WHEN (existing.id IS NOT NULL OR existingByBook.id IS NOT NULL) AND COALESCE(book.minimumStudyMinutesSource, '') <> 'book-dialog' THEN COALESCE(existing.minimum_study_minutes, existingByBook.minimum_study_minutes, 0)
+      WHEN TRY_CONVERT(int, book.minimumStudyMinutes) BETWEEN 10 AND 120 THEN (TRY_CONVERT(int, book.minimumStudyMinutes) / 10) * 10
+      ELSE 0
+    END,
+    NULLIF(book.minimumStudyMinutesSource, ''),
     NULLIF(book.startDate, ''),
     NULLIF(book.endDate, ''),
     CASE WHEN book.rewardEnabled IN ('true', '1') THEN 1 ELSE 0 END,
@@ -806,6 +914,8 @@ BEGIN
     subjectSettingId UNIQUEIDENTIFIER '$.subjectSettingId',
     book NVARCHAR(200) '$.book',
     scheduleTime NVARCHAR(5) '$.scheduleTime',
+    minimumStudyMinutes NVARCHAR(20) '$.minimumStudyMinutes',
+    minimumStudyMinutesSource NVARCHAR(30) '$.minimumStudyMinutesSource',
     startDate NVARCHAR(10) '$.startDate',
     endDate NVARCHAR(10) '$.endDate',
     rewardEnabled NVARCHAR(5) '$.rewardEnabled',
@@ -813,13 +923,18 @@ BEGIN
     rewardLabel NVARCHAR(50) '$.rewardLabel',
     scheduleDays NVARCHAR(MAX) '$.scheduleDays' AS JSON
   ) book
+  LEFT JOIN @existing_books existing ON existing.id = book.id
+  LEFT JOIN @existing_books existingByBook
+    ON existingByBook.child_id = TRY_CONVERT(uniqueidentifier, book.childId)
+    AND existingByBook.subject_setting_id = book.subjectSettingId
+    AND existingByBook.name = book.book
   WHERE
     book.id IS NOT NULL
     AND book.subjectSettingId IS NOT NULL
     AND NULLIF(book.book, '') IS NOT NULL;
 
   INSERT INTO dbo.books
-    (id, user_id, child_id, subject_setting_id, name, schedule_time, start_date, end_date, reward_enabled, reward_amount, reward_label)
+    (id, user_id, child_id, subject_setting_id, name, schedule_time, minimum_study_minutes, start_date, end_date, reward_enabled, reward_amount, reward_label)
   SELECT
     id,
     @user_id,
@@ -827,6 +942,7 @@ BEGIN
     subject_setting_id,
     name,
     TRY_CONVERT(time(0), schedule_time),
+    minimum_study_minutes,
     TRY_CONVERT(date, start_date),
     TRY_CONVERT(date, end_date),
     reward_enabled,
@@ -843,13 +959,19 @@ BEGIN
   WHERE TRY_CONVERT(tinyint, dayValue.value) BETWEEN 0 AND 6;
 
   INSERT INTO dbo.study_entries
-    (user_id, child_id, book_id, study_date, amount, memo, completed, reward_awarded, reward_amount, reward_label, reward_redeemed, reward_redeemed_at, study_started_at, study_duration_seconds, student_feedback, updated_at)
+    (user_id, child_id, book_id, study_date, amount, minimum_study_minutes, memo, completed, reward_awarded, reward_amount, reward_label, reward_redeemed, reward_redeemed_at, study_started_at, study_duration_seconds, student_feedback, updated_at)
   SELECT
     @user_id,
     book.child_id,
     entry.bookId,
     TRY_CONVERT(date, entry.studyDate),
     CASE WHEN existing.updated_at > COALESCE(TRY_CONVERT(datetime2(0), NULLIF(entry.updatedAt, '')), '19000101') THEN existing.amount ELSE NULLIF(entry.amount, '') END,
+    CASE
+      WHEN existing.updated_at > COALESCE(TRY_CONVERT(datetime2(0), NULLIF(entry.updatedAt, '')), '19000101') THEN existing.minimum_study_minutes
+      WHEN entry.minimumStudyMinutes IS NULL THEN COALESCE(existing.minimum_study_minutes, 0)
+      WHEN TRY_CONVERT(int, entry.minimumStudyMinutes) BETWEEN 10 AND 120 THEN (TRY_CONVERT(int, entry.minimumStudyMinutes) / 10) * 10
+      ELSE 0
+    END,
     CASE WHEN existing.updated_at > COALESCE(TRY_CONVERT(datetime2(0), NULLIF(entry.updatedAt, '')), '19000101') THEN existing.memo ELSE NULLIF(entry.memo, '') END,
     CASE WHEN existing.updated_at > COALESCE(TRY_CONVERT(datetime2(0), NULLIF(entry.updatedAt, '')), '19000101') THEN existing.completed ELSE CASE WHEN entry.completed IN ('true', '1') THEN 1 ELSE 0 END END,
     CASE WHEN existing.updated_at > COALESCE(TRY_CONVERT(datetime2(0), NULLIF(entry.updatedAt, '')), '19000101') THEN existing.reward_awarded ELSE CASE WHEN entry.rewardAwarded IN ('true', '1') THEN 1 ELSE 0 END END,
@@ -866,6 +988,7 @@ BEGIN
     bookId UNIQUEIDENTIFIER '$.bookId',
     studyDate NVARCHAR(10) '$.date',
     amount NVARCHAR(200) '$.amount',
+    minimumStudyMinutes NVARCHAR(20) '$.minimumStudyMinutes',
     memo NVARCHAR(1000) '$.memo',
     completed NVARCHAR(5) '$.completed',
     rewardAwarded NVARCHAR(5) '$.rewardAwarded',
@@ -886,13 +1009,14 @@ BEGIN
   WHERE entry.bookId IS NOT NULL AND TRY_CONVERT(date, entry.studyDate) IS NOT NULL;
 
   INSERT INTO dbo.study_entries
-    (user_id, child_id, book_id, study_date, amount, memo, completed, reward_awarded, reward_amount, reward_label, reward_redeemed, reward_redeemed_at, study_started_at, study_duration_seconds, student_feedback, updated_at)
+    (user_id, child_id, book_id, study_date, amount, minimum_study_minutes, memo, completed, reward_awarded, reward_amount, reward_label, reward_redeemed, reward_redeemed_at, study_started_at, study_duration_seconds, student_feedback, updated_at)
   SELECT
     @user_id,
     existing.child_id,
     existing.book_id,
     existing.study_date,
     existing.amount,
+    existing.minimum_study_minutes,
     existing.memo,
     existing.completed,
     existing.reward_awarded,
@@ -980,6 +1104,7 @@ BEGIN
     ss.color AS subjectColor,
     b.name AS book,
     b.schedule_time AS scheduleTime,
+    b.minimum_study_minutes AS minimumStudyMinutes,
     b.start_date AS startDate,
     b.end_date AS endDate,
     b.reward_enabled AS rewardEnabled,
@@ -1002,6 +1127,7 @@ BEGIN
     se.book_id AS bookId,
     se.study_date AS studyDate,
     se.amount,
+    se.minimum_study_minutes AS minimumStudyMinutes,
     se.memo,
     se.completed,
     se.reward_awarded AS rewardAwarded,
@@ -1039,6 +1165,7 @@ BEGIN
     @reward_enabled BIT,
     @reward_amount INT,
     @reward_label NVARCHAR(50),
+    @book_minimum_study_minutes INT = 0,
     @previous_reward_awarded BIT = 0,
     @previous_reward_amount INT = 0,
     @previous_reward_label NVARCHAR(50) = NULL,
@@ -1053,7 +1180,8 @@ BEGIN
   SELECT
     @reward_enabled = reward_enabled,
     @reward_amount = reward_amount,
-    @reward_label = reward_label
+    @reward_label = reward_label,
+    @book_minimum_study_minutes = minimum_study_minutes
   FROM dbo.books
   WHERE id = @book_id AND user_id = @teacher_user_id AND child_id = @child_id;
 
@@ -1120,14 +1248,15 @@ BEGIN
       updated_at = SYSUTCDATETIME()
   WHEN NOT MATCHED THEN
     INSERT
-      (user_id, child_id, book_id, study_date, amount, memo, completed, reward_awarded, reward_amount, reward_label, reward_redeemed, reward_redeemed_at, study_started_at, study_duration_seconds, student_feedback, updated_at)
+      (user_id, child_id, book_id, study_date, amount, minimum_study_minutes, memo, completed, reward_awarded, reward_amount, reward_label, reward_redeemed, reward_redeemed_at, study_started_at, study_duration_seconds, student_feedback, updated_at)
     VALUES
-      (@teacher_user_id, @child_id, @book_id, @study_date, NULLIF(@amount, ''), NULLIF(@memo, ''), @completed, @next_reward_awarded, @next_reward_amount, @next_reward_label, @next_reward_redeemed, @next_reward_redeemed_at, @study_started_at, CASE WHEN @study_duration_seconds > 0 THEN @study_duration_seconds ELSE 0 END, NULLIF(@student_feedback, ''), SYSUTCDATETIME());
+      (@teacher_user_id, @child_id, @book_id, @study_date, NULLIF(@amount, ''), @book_minimum_study_minutes, NULLIF(@memo, ''), @completed, @next_reward_awarded, @next_reward_amount, @next_reward_label, @next_reward_redeemed, @next_reward_redeemed_at, @study_started_at, CASE WHEN @study_duration_seconds > 0 THEN @study_duration_seconds ELSE 0 END, NULLIF(@student_feedback, ''), SYSUTCDATETIME());
 
   SELECT
     book_id AS bookId,
     study_date AS studyDate,
     amount,
+    minimum_study_minutes AS minimumStudyMinutes,
     memo,
     completed,
     reward_awarded AS rewardAwarded,
@@ -1160,6 +1289,7 @@ CREATE OR ALTER PROCEDURE dbo.app_update_teacher_entry
   @study_started_at DATETIME2(0) = NULL,
   @study_duration_seconds INT = 0,
   @student_feedback NVARCHAR(1000) = NULL,
+  @minimum_study_minutes INT = 0,
   @updated_at DATETIME2(0) = NULL
 AS
 BEGIN
@@ -1196,6 +1326,7 @@ BEGIN
   WHEN MATCHED THEN
     UPDATE SET
       amount = NULLIF(@amount, ''),
+      minimum_study_minutes = CASE WHEN @minimum_study_minutes BETWEEN 10 AND 120 THEN (@minimum_study_minutes / 10) * 10 ELSE 0 END,
       memo = NULLIF(@memo, ''),
       completed = @completed,
       reward_awarded = @reward_awarded,
@@ -1209,15 +1340,16 @@ BEGIN
       updated_at = COALESCE(@updated_at, SYSUTCDATETIME())
   WHEN NOT MATCHED THEN
     INSERT
-      (user_id, child_id, book_id, study_date, amount, memo, completed, reward_awarded, reward_amount, reward_label, reward_redeemed, reward_redeemed_at, study_started_at, study_duration_seconds, student_feedback, updated_at)
+      (user_id, child_id, book_id, study_date, amount, minimum_study_minutes, memo, completed, reward_awarded, reward_amount, reward_label, reward_redeemed, reward_redeemed_at, study_started_at, study_duration_seconds, student_feedback, updated_at)
     VALUES
-      (@user_id, @child_id, @book_id, @study_date, NULLIF(@amount, ''), NULLIF(@memo, ''), @completed, @reward_awarded, CASE WHEN @reward_amount > 0 THEN @reward_amount ELSE 0 END, NULLIF(@reward_label, ''), @reward_redeemed, @reward_redeemed_at, @study_started_at, CASE WHEN @study_duration_seconds > 0 THEN @study_duration_seconds ELSE 0 END, NULLIF(@student_feedback, ''), COALESCE(@updated_at, SYSUTCDATETIME()));
+      (@user_id, @child_id, @book_id, @study_date, NULLIF(@amount, ''), CASE WHEN @minimum_study_minutes BETWEEN 10 AND 120 THEN (@minimum_study_minutes / 10) * 10 ELSE 0 END, NULLIF(@memo, ''), @completed, @reward_awarded, CASE WHEN @reward_amount > 0 THEN @reward_amount ELSE 0 END, NULLIF(@reward_label, ''), @reward_redeemed, @reward_redeemed_at, @study_started_at, CASE WHEN @study_duration_seconds > 0 THEN @study_duration_seconds ELSE 0 END, NULLIF(@student_feedback, ''), COALESCE(@updated_at, SYSUTCDATETIME()));
 
   SELECT
     c.name AS childName,
     se.book_id AS bookId,
     se.study_date AS studyDate,
     se.amount,
+    se.minimum_study_minutes AS minimumStudyMinutes,
     se.memo,
     se.completed,
     se.reward_awarded AS rewardAwarded,

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#2f9d62">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="스터디플로우">
+    <title>학생 등록 | StudyFlow</title>
+    <script src="./theme.js"></script>
+    <script defer src="./pwa-register.js"></script>
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" href="./assets/studyflow-icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body class="profile-page child-page">
+    <div class="profile-page-shell">
+      <header class="profile-page-head">
+        <div>
+          <div class="profile-title-row">
+            <a class="profile-title-back" id="childPageBack" href="./index.html" aria-label="스터디플로우로 돌아가기">
+              <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                <path d="M15 18 9 12l6-6"></path>
+              </svg>
+            </a>
+            <h1 id="childPageTitle">학생 등록</h1>
+          </div>
+        </div>
+      </header>
+
+      <main class="profile-edit-layout child-edit-layout">
+        <form class="profile-edit-form child-edit-form" id="childPageForm">
+          <section class="profile-edit-section" aria-label="학생 정보">
+            <h2>학생 정보</h2>
+            <div class="book-form-grid child-form-grid">
+              <label>
+                <span>학생 이름</span>
+                <input id="childPageName" required placeholder="예: 민준">
+              </label>
+              <label>
+                <span>생일</span>
+                <input id="childPageBirthMonth" type="date">
+              </label>
+              <label>
+                <span>학생 휴대폰</span>
+                <input id="childPagePhone" type="tel" inputmode="tel" maxlength="13" placeholder="예: 010-1234-5678">
+              </label>
+              <label>
+                <span>학부모 휴대폰</span>
+                <input id="childPageParentPhone" type="tel" inputmode="tel" maxlength="13" placeholder="예: 010-1234-5678">
+              </label>
+              <label class="book-form-wide">
+                <span>학생 아이디</span>
+                <div class="verify-row">
+                  <input id="childPageLoginId" autocomplete="username" placeholder="예: minjun01">
+                  <button class="ghost" type="button" id="childPageVerifyLoginId">중복 확인</button>
+                </div>
+                <p class="field-help" id="childPageLoginIdHelp"></p>
+              </label>
+              <label>
+                <span>비밀번호</span>
+                <input id="childPagePassword" type="password" autocomplete="new-password" placeholder="비밀번호">
+              </label>
+              <label>
+                <span>비밀번호 확인</span>
+                <input id="childPagePasswordConfirm" type="password" autocomplete="new-password" placeholder="비밀번호 한 번 더 입력">
+              </label>
+              <div class="profile-edit-actions book-form-wide">
+                <button type="submit" id="childPageSubmit">등록</button>
+              </div>
+            </div>
+          </section>
+        </form>
+      </main>
+    </div>
+    <div class="profile-toast" id="childPageToast" role="status" aria-live="polite"></div>
+
+    <script src="./child.js"></script>
+  </body>
+</html>

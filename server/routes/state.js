@@ -40,6 +40,19 @@ function toTimeText(value) {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
+function normalizeMinimumStudyMinutes(value) {
+  const minutes = Number.parseInt(value, 10) || 0;
+  if (minutes < 10 || minutes > 120) return 0;
+  return Math.floor(minutes / 10) * 10;
+}
+
+function readOptionalMinimumStudyMinutes(value) {
+  if (!value || typeof value !== "object") return null;
+  if (value.minimumStudyMinutes !== undefined && value.minimumStudyMinutes !== null) return normalizeMinimumStudyMinutes(value.minimumStudyMinutes);
+  if (value.minimum_study_minutes !== undefined && value.minimum_study_minutes !== null) return normalizeMinimumStudyMinutes(value.minimum_study_minutes);
+  return null;
+}
+
 function toDayNumber(value) {
   if (typeof value === "number") return value;
   if (/^\d+$/.test(String(value))) return Number(value);
@@ -68,6 +81,8 @@ function buildStateFromRecordsets(recordsets) {
     id: String(child.id),
     name: child.name,
     birthMonth: toDateText(child.birthMonth),
+    phone: child.phone || "",
+    parentPhone: child.parentPhone || "",
     loginId: child.loginId || "",
     password: ""
   }));
@@ -82,6 +97,7 @@ function buildStateFromRecordsets(recordsets) {
       book: book.book,
       scheduleDays: scheduleDaysByBook.get(String(book.id)) || [],
       scheduleTime: toTimeText(book.scheduleTime),
+      minimumStudyMinutes: normalizeMinimumStudyMinutes(book.minimumStudyMinutes),
       startDate: toDateText(book.startDate),
       endDate: toDateText(book.endDate),
       rewardEnabled: Boolean(book.rewardEnabled),
@@ -100,6 +116,7 @@ function buildStateFromRecordsets(recordsets) {
       subjectId: String(entry.bookId),
       date,
       amount: entry.amount || "",
+      minimumStudyMinutes: normalizeMinimumStudyMinutes(entry.minimumStudyMinutes),
       memo: entry.memo || "",
       completed: Boolean(entry.completed),
       rewardAwarded: Boolean(entry.rewardAwarded),
@@ -166,6 +183,8 @@ async function normalizeStateForProcedure(state) {
     return {
       ...child,
       id: ensureUuid(child.id),
+      phone: String(child.phone || "").trim(),
+      parentPhone: String(child.parentPhone || "").trim(),
       loginId: String(child.loginId || "").trim(),
       password: "",
       passwordHash: password ? await bcrypt.hash(password, 12) : null,
@@ -210,6 +229,8 @@ async function normalizeStateForProcedure(state) {
           .map(toDayNumber)
           .filter((day) => day !== null && day >= 0 && day <= 6),
         scheduleTime: toTimeText(book.scheduleTime ?? book.schedule_time),
+        minimumStudyMinutes: readOptionalMinimumStudyMinutes(book),
+        minimumStudyMinutesSource: book.minimumStudyMinutesSource === "book-dialog" || book.minimum_study_minutes_source === "book-dialog" ? "book-dialog" : "",
         startDate: book.startDate || "",
         endDate: book.endDate || "",
         rewardEnabled: Boolean(book.rewardEnabled),
@@ -234,6 +255,7 @@ async function normalizeStateForProcedure(state) {
       studyStartedAt: entry.studyStartedAt || "",
       studyDurationSeconds: Number.parseInt(entry.studyDurationSeconds, 10) > 0 ? Number.parseInt(entry.studyDurationSeconds, 10) : 0,
       studentFeedback: String(entry.studentFeedback || "").trim(),
+      minimumStudyMinutes: readOptionalMinimumStudyMinutes(entry),
       updatedAt: entry.updatedAt || ""
     }))
     .filter((entry) => entry.bookId && entry.date);
@@ -366,6 +388,8 @@ router.put("/entries", requireAuth, requireTeacher, async (request, response, ne
       studentFeedback = "",
       updatedAt = ""
     } = request.body || {};
+    const hasMinimumStudyMinutes = Object.prototype.hasOwnProperty.call(request.body || {}, "minimumStudyMinutes");
+    const minimumStudyMinutes = normalizeMinimumStudyMinutes(request.body?.minimumStudyMinutes);
 
     if (!child || !subjectId || !date) {
       return response.status(400).json({
@@ -381,6 +405,7 @@ router.put("/entries", requireAuth, requireTeacher, async (request, response, ne
       .input("book_id", sql.UniqueIdentifier, subjectId)
       .input("study_date", sql.Date, date)
       .input("amount", sql.NVarChar(200), String(amount || "").trim())
+      .input("minimum_study_minutes", sql.Int, minimumStudyMinutes)
       .input("memo", sql.NVarChar(1000), String(memo || "").trim())
       .input("completed", sql.Bit, Boolean(completed))
       .input("reward_awarded", sql.Bit, Boolean(rewardAwarded))
@@ -393,7 +418,51 @@ router.put("/entries", requireAuth, requireTeacher, async (request, response, ne
       .input("student_feedback", sql.NVarChar(1000), String(studentFeedback || "").trim())
       .input("updated_at", sql.DateTime2, updatedAt ? new Date(updatedAt) : null)
       .execute("dbo.app_update_teacher_entry");
-    const entry = result.recordset[0];
+
+    if (hasMinimumStudyMinutes) {
+      await pool.request()
+        .input("user_id", sql.UniqueIdentifier, request.user.sub)
+        .input("book_id", sql.UniqueIdentifier, subjectId)
+        .input("study_date", sql.Date, date)
+        .input("minimum_study_minutes", sql.Int, minimumStudyMinutes)
+        .query(`
+          UPDATE dbo.study_entries
+          SET minimum_study_minutes = @minimum_study_minutes
+          WHERE user_id = @user_id
+            AND book_id = @book_id
+            AND study_date = @study_date;
+        `);
+    }
+
+    const entryResult = await pool.request()
+      .input("user_id", sql.UniqueIdentifier, request.user.sub)
+      .input("book_id", sql.UniqueIdentifier, subjectId)
+      .input("study_date", sql.Date, date)
+      .query(`
+        SELECT
+          c.name AS childName,
+          se.book_id AS bookId,
+          se.study_date AS studyDate,
+          se.amount,
+          se.minimum_study_minutes AS minimumStudyMinutes,
+          se.memo,
+          se.completed,
+          se.reward_awarded AS rewardAwarded,
+          se.reward_amount AS rewardAmount,
+          se.reward_label AS rewardLabel,
+          se.reward_redeemed AS rewardRedeemed,
+          se.reward_redeemed_at AS rewardRedeemedAt,
+          se.study_started_at AS studyStartedAt,
+          se.study_duration_seconds AS studyDurationSeconds,
+          se.student_feedback AS studentFeedback,
+          se.updated_at AS updatedAt
+        FROM dbo.study_entries se
+        INNER JOIN dbo.children c ON c.id = se.child_id
+        WHERE se.user_id = @user_id
+          AND se.book_id = @book_id
+          AND se.study_date = @study_date;
+      `);
+    const entry = entryResult.recordset[0] || result.recordset[0];
     const studyDate = toDateText(entry.studyDate);
 
     response.json({
@@ -403,6 +472,7 @@ router.put("/entries", requireAuth, requireTeacher, async (request, response, ne
         subjectId: String(entry.bookId),
         date: studyDate,
         amount: entry.amount || "",
+        minimumStudyMinutes: normalizeMinimumStudyMinutes(entry.minimumStudyMinutes),
         memo: entry.memo || "",
         completed: Boolean(entry.completed),
         rewardAwarded: Boolean(entry.rewardAwarded),

@@ -1,4 +1,4 @@
-const CACHE_VERSION = "studyflow-v24";
+const CACHE_VERSION = "studyflow-v25";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const BASE_URL = new URL("./", self.location.href);
 const NAVIGATION_FALLBACK = new URL("offline.html", BASE_URL).pathname;
@@ -10,6 +10,8 @@ const STATIC_ASSETS = [
   "./signup.html",
   "./student.html",
   "./profile.html",
+  "./book.html",
+  "./child.html",
   "./offline.html",
   "./styles.css",
   "./theme.js",
@@ -17,6 +19,8 @@ const STATIC_ASSETS = [
   "./app.js",
   "./student.js",
   "./profile.js",
+  "./book.js",
+  "./child.js",
   "./pwa-register.js",
   "./push-client.js",
   "./manifest.webmanifest",

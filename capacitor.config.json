@@ -3,7 +3,7 @@
   "appName": "StudyFlow",
   "webDir": "dist-iis/web",
   "server": {
-    "url": "https://csid.kr/studyflow/",
+    "url": "https://studyflow.csid.kr",
     "cleartext": false
   }
 }

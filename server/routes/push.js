@@ -91,6 +91,14 @@ function normalizeAppToken(body) {
   return { token, platform, deviceId };
 }
 
+function getWebAppUrl() {
+  return (process.env.STUDYFLOW_WEB_URL || "https://studyflow.csid.kr").trim().replace(/\/+$/, "");
+}
+
+function buildWebAppUrl(pathname) {
+  return new URL(pathname, `${getWebAppUrl()}/`).href;
+}
+
 function normalizeEventPayload(body, user) {
   const eventType = body?.eventType === "complete" ? "complete" : "start";
   const studentName = String(user.childName || "학생").trim();
@@ -113,7 +121,7 @@ function normalizeEventPayload(body, user) {
   return {
     title,
     body: bodyParts.join("\n") || "StudyFlow 학습 알림",
-    url: "./index.html"
+    url: buildWebAppUrl("index.html")
   };
 }
 
@@ -135,7 +143,7 @@ function normalizeTeacherSchedulePayload(body) {
   return {
     title: `${childName} 학습 일정 등록`,
     body: bodyParts.join("\n") || "새 학습 일정이 등록되었습니다.",
-    url: "./student.html"
+    url: buildWebAppUrl("student.html")
   };
 }
 

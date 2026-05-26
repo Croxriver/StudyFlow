@@ -1728,6 +1728,33 @@ label {
 	min-width: 110px;
 }
 
+.book-edit-form {
+	gap: 20px;
+}
+
+.book-form-grid {
+	display: grid;
+	gap: 16px;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.book-form-wide {
+	grid-column: 1 / -1;
+}
+
+.book-page-schedule-days {
+	display: grid;
+	flex: none;
+	grid-template-columns: repeat(7, minmax(0, 1fr));
+	padding: 10px;
+	width: 100%;
+}
+
+.book-page-schedule-days label {
+	justify-content: center;
+	min-height: 38px;
+}
+
 .profile-toast {
 	background: var(--ink);
 	border: 1px solid color-mix(in srgb, var(--ink) 84%, #fff);
@@ -2472,6 +2499,12 @@ td:has(.entry-cell) {
 	border-left: 3px solid var(--accent);
 }
 
+[data-theme="dark"] .pending-plan-item.is-overdue {
+	background: color-mix(in srgb, var(--panel) 82%, var(--accent) 18%);
+	border-color: color-mix(in srgb, var(--line-strong) 70%, var(--accent) 30%);
+	border-left-color: var(--accent);
+}
+
 .pending-plan-item strong {
 	align-items: center;
 	display: flex;
@@ -2600,6 +2633,41 @@ td:has(.entry-cell) {
 	align-content: start;
 }
 
+.access-log-list {
+	display: grid;
+	gap: 8px;
+}
+
+.access-log-item {
+	align-items: center;
+	background: color-mix(in srgb, var(--panel) 76%, transparent);
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	display: flex;
+	gap: 12px;
+	justify-content: space-between;
+	padding: 10px 12px;
+}
+
+.access-log-item strong {
+	color: var(--ink);
+	display: block;
+	font-size: 14px;
+	line-height: 1.25;
+}
+
+.access-log-item p,
+.access-log-item span {
+	color: var(--muted);
+	font-size: 12px;
+	margin: 0;
+}
+
+.access-log-item span {
+	flex: 0 0 auto;
+	font-weight: 700;
+}
+
 .settings-panel {
 	align-items: center;
 }
@@ -2658,6 +2726,139 @@ td:has(.entry-cell) {
 .settings-option:focus-within {
 	outline: 2px solid var(--focus);
 	outline-offset: 2px;
+}
+
+.app-lock-settings-panel {
+	gap: 16px;
+}
+
+.app-lock-settings {
+	align-items: center;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	justify-content: flex-end;
+}
+
+.app-lock-timeout {
+	background: var(--panel);
+	border: 1px solid var(--line);
+	border-radius: 9px;
+	color: var(--ink);
+	font-size: 13px;
+	font-weight: 700;
+	min-height: 40px;
+	padding: 0 12px;
+}
+
+.app-lock-screen {
+	align-items: center;
+	background: color-mix(in srgb, var(--page) 88%, transparent);
+	backdrop-filter: blur(14px);
+	display: flex;
+	inset: 0;
+	justify-content: center;
+	padding: 24px;
+	position: fixed;
+	z-index: 9999;
+}
+
+.app-lock-screen[hidden] {
+	display: none;
+}
+
+.app-lock-panel {
+	background: var(--panel);
+	border: 1px solid var(--line);
+	border-radius: 18px;
+	box-shadow: var(--shadow-strong);
+	max-width: 360px;
+	padding: 24px;
+	text-align: center;
+	width: min(100%, 360px);
+}
+
+.app-lock-panel h2 {
+	color: var(--ink);
+	font-size: 22px;
+	margin: 4px 0 8px;
+}
+
+.app-lock-message {
+	color: var(--muted);
+	font-size: 14px;
+	margin: 0 0 18px;
+}
+
+.app-lock-message.is-error {
+	color: #dc2626;
+}
+
+.app-lock-pin {
+	background: var(--subtle);
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	color: var(--ink);
+	font-size: 22px;
+	font-weight: 800;
+	letter-spacing: 0;
+	margin-bottom: 16px;
+	min-height: 52px;
+	text-align: center;
+	width: 100%;
+}
+
+.app-lock-pattern {
+	display: grid;
+	gap: 10px;
+	grid-template-columns: repeat(3, 1fr);
+	margin: 0 auto 16px;
+	max-width: 220px;
+}
+
+.app-lock-pattern button {
+	aspect-ratio: 1;
+	background: var(--subtle);
+	border: 1px solid var(--line);
+	border-radius: 50%;
+	color: var(--muted-strong);
+	font-size: 0;
+	padding: 0;
+	position: relative;
+}
+
+.app-lock-pattern button::after {
+	background: var(--muted);
+	border-radius: 50%;
+	content: "";
+	height: 10px;
+	left: 50%;
+	position: absolute;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	width: 10px;
+}
+
+.app-lock-pattern button.active {
+	background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+	border-color: var(--accent);
+}
+
+.app-lock-pattern button.active::after {
+	background: var(--accent);
+}
+
+.app-lock-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	justify-content: center;
+}
+
+.is-app-locked .app,
+.is-app-locked .bottom-nav,
+.is-app-locked .study-session-screen {
+	pointer-events: none;
 }
 
 .mypage-content .profile-panel:has(.profile-panel-actions) {
@@ -3165,6 +3366,40 @@ td:has(.entry-cell) {
 	margin-bottom: 0;
 }
 
+.student-plan-schedule {
+	align-items: center;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 7px;
+	line-height: 1.35;
+}
+
+.student-plan-minimum {
+	align-items: center;
+	background: color-mix(in srgb, var(--primary) 10%, var(--panel));
+	border: 1px solid color-mix(in srgb, var(--primary) 26%, var(--line));
+	border-radius: 999px;
+	color: var(--primary-dark);
+	display: inline-flex;
+	font-size: 12px;
+	font-weight: 800;
+	gap: 4px;
+	line-height: 1;
+	min-height: 24px;
+	padding: 5px 9px;
+	white-space: nowrap;
+}
+
+.student-plan-minimum svg {
+	fill: none;
+	height: 14px;
+	stroke: currentColor;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+	stroke-width: 2;
+	width: 14px;
+}
+
 .student-plan-head .student-plan-reward {
 	color: #9a3412;
 	font-weight: 700;
@@ -3325,30 +3560,154 @@ td:has(.entry-cell) {
 	width: auto;
 }
 
+@property --progress {
+	inherits: false;
+	initial-value: 0deg;
+	syntax: "<angle>";
+}
+
 .study-session-progress {
 	--progress: 0deg;
 	align-items: center;
-	background:
-		repeating-conic-gradient(var(--primary) 0 4deg, transparent 4deg 6deg) 0 0 / 100% 100%,
-		repeating-conic-gradient(var(--track) 0 4deg, transparent 4deg 6deg) 0 0 / 100% 100%;
 	border-radius: 50%;
 	display: flex;
 	height: 132px;
 	justify-content: center;
-	-webkit-mask: conic-gradient(#000 var(--progress), rgba(0, 0, 0, 0.2) 0);
-	mask: conic-gradient(#000 var(--progress), rgba(0, 0, 0, 0.2) 0);
 	position: relative;
-	transition:
-		-webkit-mask 0.2s ease,
-		mask 0.2s ease;
+	transition: --progress 0.45s linear;
 	width: 132px;
 }
 
+.study-session-progress::after {
+	background:
+		repeating-conic-gradient(var(--primary) 0 4deg, transparent 4deg 6deg) 0 0 / 100% 100%,
+		repeating-conic-gradient(var(--track) 0 4deg, transparent 4deg 6deg) 0 0 / 100% 100%;
+	border-radius: inherit;
+	content: "";
+	filter: blur(0.25px);
+	inset: 0;
+	position: absolute;
+	transform: translateZ(0);
+	-webkit-mask: conic-gradient(#000 var(--progress), rgba(0, 0, 0, 0.2) 0);
+	mask: conic-gradient(#000 var(--progress), rgba(0, 0, 0, 0.2) 0);
+}
+
+.study-session-progress.is-spinner::after {
+	animation: studyTimerSpin 2.6s linear infinite;
+	background: conic-gradient(from 0deg, transparent 0 68%, color-mix(in srgb, var(--primary) 18%, transparent) 72%, var(--primary) 84%, transparent 96% 100%);
+	opacity: 0.9;
+	-webkit-mask: radial-gradient(circle, transparent 0 57px, #000 58px 66px, transparent 67px);
+	mask: radial-gradient(circle, transparent 0 57px, #000 58px 66px, transparent 67px);
+}
+
+.study-session-progress.is-countdown {
+	background: var(--field);
+	border: 1px solid var(--line);
+	box-shadow: inset 0 0 0 8px color-mix(in srgb, var(--primary) 10%, transparent);
+	overflow: hidden;
+}
+
+.study-session-progress.is-countdown.is-ready {
+	box-shadow: inset 0 0 0 8px color-mix(in srgb, var(--success) 22%, transparent);
+}
+
+.study-session-progress.is-countdown::after {
+	animation: studyTimerOrbit 2.4s linear infinite;
+	background: conic-gradient(from 0deg, transparent 0 12%, color-mix(in srgb, var(--primary) 34%, transparent) 24%, transparent 42% 100%);
+	border-radius: inherit;
+	content: "";
+	filter: blur(0.2px);
+	inset: 0;
+	opacity: 0.85;
+	position: absolute;
+	transform-origin: center;
+	-webkit-mask: radial-gradient(circle, transparent 0 48px, #000 49px 66px, transparent 67px);
+	mask: radial-gradient(circle, transparent 0 48px, #000 49px 66px, transparent 67px);
+	z-index: 2;
+}
+
+.study-session-progress.is-countdown::before {
+	animation: studyTimerThinking 1.65s ease-in-out infinite;
+	background:
+		radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--primary) 28%, transparent) 0 38%, transparent 40%),
+		conic-gradient(from 0deg, color-mix(in srgb, var(--primary) 34%, transparent), transparent 22%, color-mix(in srgb, var(--primary) 24%, transparent) 44%, transparent 68%, color-mix(in srgb, var(--primary) 30%, transparent));
+	border-radius: inherit;
+	content: "";
+	filter: blur(0.6px);
+	inset: 0;
+	opacity: 0.85;
+	position: absolute;
+	-webkit-mask: radial-gradient(circle, transparent 0 49px, #000 50px 66px, transparent 67px);
+	mask: radial-gradient(circle, transparent 0 49px, #000 50px 66px, transparent 67px);
+}
+
+.study-session-progress.is-countdown.is-ready::before {
+	background:
+		radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--success) 28%, transparent) 0 38%, transparent 40%),
+		conic-gradient(from 0deg, color-mix(in srgb, var(--success) 34%, transparent), transparent 22%, color-mix(in srgb, var(--success) 24%, transparent) 44%, transparent 68%, color-mix(in srgb, var(--success) 30%, transparent));
+}
+
+.study-session-progress.is-countdown.is-ready::after {
+	background: conic-gradient(from 0deg, transparent 0 12%, color-mix(in srgb, var(--success) 34%, transparent) 24%, transparent 42% 100%);
+}
+
 .study-session-progress-inner {
+	align-items: center;
 	background: var(--panel);
 	border-radius: 50%;
+	box-shadow:
+		inset 0 0 0 1px var(--line),
+		0 10px 22px color-mix(in srgb, #000 8%, transparent);
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
 	height: 94px;
+	justify-content: center;
+	position: relative;
 	width: 94px;
+	z-index: 1;
+}
+
+.study-session-progress-inner span {
+	color: var(--muted);
+	font-size: 11px;
+	font-weight: 800;
+	letter-spacing: 0.04em;
+	line-height: 1;
+	text-transform: uppercase;
+}
+
+.study-session-progress-inner strong {
+	color: var(--ink);
+	font-size: 20px;
+	font-weight: 800;
+	letter-spacing: 0;
+	line-height: 1;
+}
+
+@keyframes studyTimerSpin {
+	to {
+		transform: translateZ(0) rotate(360deg);
+	}
+}
+
+@keyframes studyTimerThinking {
+	0%,
+	100% {
+		opacity: 0.55;
+		transform: rotate(-18deg) scale(0.94);
+	}
+
+	50% {
+		opacity: 1;
+		transform: rotate(18deg) scale(1.08);
+	}
+}
+
+@keyframes studyTimerOrbit {
+	to {
+		transform: rotate(360deg);
+	}
 }
 
 .study-session-copy {
@@ -3411,7 +3770,7 @@ td:has(.entry-cell) {
 .study-session-stats {
 	display: grid;
 	gap: 12px;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
+	grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 	width: 100%;
 }
 
@@ -3917,6 +4276,10 @@ td:has(.entry-cell) {
 	display: grid;
 	gap: 10px;
 	grid-template-columns: minmax(110px, 0.7fr) minmax(160px, 1fr);
+}
+
+.reward-fields[hidden] {
+	display: none;
 }
 
 .reward-fields label {
@@ -4716,6 +5079,15 @@ dialog label {
 		width: 100%;
 	}
 
+	.access-log-item {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.access-log-item span {
+		flex: none;
+	}
+
 	.profile-avatar {
 		flex-basis: 30px;
 		height: 30px;
@@ -4990,6 +5362,14 @@ dialog label {
 	.profile-edit-actions a,
 	.profile-edit-actions button {
 		width: 100%;
+	}
+
+	.book-form-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.book-page-schedule-days {
+		grid-template-columns: repeat(4, minmax(0, 1fr));
 	}
 
 	.subject-form button {

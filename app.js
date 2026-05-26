@@ -14,8 +14,14 @@ if (!authToken) {
 
 const authUser = authSession.user;
 const STORAGE_KEY = getAccountStorageKey();
+const PENDING_SYNC_KEY = `${STORAGE_KEY}:pending-sync`;
+const PENDING_MINIMUM_STUDY_KEY = `${STORAGE_KEY}:pending-minimum-study`;
 const LEGACY_PAGE_STORAGE_KEY = "studyflow-teacher-active-page";
 const PAGE_STORAGE_KEY = `studyflow-teacher-active-page:${authUser.id || authUser.email || "anonymous"}`;
+const TEACHER_LOGIN_STARTUP_KEY = `studyflow-teacher-login-startup:${authUser.id || authUser.email || "anonymous"}`;
+const ACCESS_LOG_SKIP_KEY = `studyflow-access-log-skip:teacher:${authUser.id || authUser.email || "anonymous"}`;
+const ACCESS_LOG_SKIP_TTL_MS = 3000;
+const ACCESS_LOG_THROTTLE_MS = 5000;
 const accountStateBeforeRemoteLoad = localStorage.getItem(STORAGE_KEY);
 const legacyStateBeforeRemoteLoad = localStorage.getItem(LEGACY_STORAGE_KEY);
 const DEFAULT_USER_SETTINGS = {
@@ -64,6 +70,9 @@ let syncStateTimer = null;
 let isHydratingRemoteState = false;
 let isForcingChildRegistration = false;
 let pushState = { supported: false, subscribed: false, permission: "default" };
+let accessLogs = [];
+let accessLogsLoading = false;
+let lastAccessLogAt = 0;
 
 function getAuthUser() {
 	try {
@@ -124,6 +133,7 @@ const els = {
 	bookName: document.querySelector("#bookName"),
 	scheduleHour: document.querySelector("#scheduleHour"),
 	scheduleMinute: document.querySelector("#scheduleMinute"),
+	minimumStudyMinutes: document.querySelector("#minimumStudyMinutes"),
 	bookStartDate: document.querySelector("#bookStartDate"),
 	bookEndDate: document.querySelector("#bookEndDate"),
 	autoCreatePlan: document.querySelector("#autoCreatePlan"),
@@ -149,6 +159,9 @@ const els = {
 	subjectsContent: document.querySelector("#subjectsContent"),
 	subjectsSection: document.querySelector("#subjectsPage .mypage-section"),
 	settingsSection: document.querySelector("#settingsPage .mypage-section"),
+	teacherAppLockSettings: document.querySelector("#teacherAppLockSettings"),
+	accessLogsSection: document.querySelector("#accessLogsPage .mypage-section"),
+	accessLogsContent: document.querySelector("#accessLogsContent"),
 	weekStartModeInputs: document.querySelectorAll("[data-week-start-mode]"),
 	startupScreenModeInputs: document.querySelectorAll("[data-startup-screen-mode]"),
 	entryDialog: document.querySelector("#entryDialog"),
@@ -156,6 +169,7 @@ const els = {
 	entryMeta: document.querySelector("#entryMeta"),
 	entryTitle: document.querySelector("#entryTitle"),
 	entryAmount: document.querySelector("#entryAmount"),
+	entryMinimumStudyMinutes: document.querySelector("#entryMinimumStudyMinutes"),
 	entryMemo: document.querySelector("#entryMemo"),
 	entryCompleted: document.querySelector("#entryCompleted"),
 	entryCompletedInfo: document.querySelector("#entryCompletedInfo"),
@@ -181,6 +195,7 @@ const els = {
 	editBookName: document.querySelector("#editBookName"),
 	editScheduleHour: document.querySelector("#editScheduleHour"),
 	editScheduleMinute: document.querySelector("#editScheduleMinute"),
+	editMinimumStudyMinutes: document.querySelector("#editMinimumStudyMinutes"),
 	editBookStartDate: document.querySelector("#editBookStartDate"),
 	editBookEndDate: document.querySelector("#editBookEndDate"),
 	editRegeneratePlan: document.querySelector("#editRegeneratePlan"),
@@ -194,6 +209,8 @@ const els = {
 	childAccountTitle: document.querySelector("#childAccountTitle"),
 	childAccountName: document.querySelector("#childAccountName"),
 	childBirthMonth: document.querySelector("#childBirthMonth"),
+	childPhone: document.querySelector("#childPhone"),
+	childParentPhone: document.querySelector("#childParentPhone"),
 	childLoginId: document.querySelector("#childLoginId"),
 	childLoginIdHelp: document.querySelector("#childLoginIdHelp"),
 	childPassword: document.querySelector("#childPassword"),
@@ -305,6 +322,8 @@ function normalizeChildAccounts(value) {
 				id: saved.id || crypto.randomUUID(),
 				name,
 				birthMonth: saved.birthMonth || "",
+				phone: normalizeMobilePhone(saved.phone),
+				parentPhone: normalizeMobilePhone(saved.parentPhone),
 				loginId: saved.loginId || "",
 				password: saved.password || "",
 			};
@@ -332,6 +351,7 @@ function normalizeSubject(subject) {
 		book: subject.book || "",
 		scheduleDays: Array.isArray(subject.scheduleDays) ? subject.scheduleDays : subject.schedule_days || [],
 		scheduleTime: normalizeScheduleTime(subject.scheduleTime ?? subject.schedule_time),
+		minimumStudyMinutes: readOptionalMinimumStudyMinutes(subject),
 		startDate: subject.startDate ?? subject.start_date ?? "",
 		endDate: subject.endDate ?? subject.end_date ?? "",
 		rewardEnabled: Boolean(subject.rewardEnabled ?? subject.reward_enabled),
@@ -375,7 +395,52 @@ function assignSubjectSettingsToBooks(subjectsByChild, subjectSettings) {
 
 function saveState(options = {}) {
 	localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-	if (options.sync !== false) scheduleRemoteStateSync();
+	if (options.sync !== false) {
+		markPendingRemoteSync();
+		scheduleRemoteStateSync();
+	}
+}
+
+function normalizeMobilePhone(value) {
+	const raw = String(value || "").trim();
+	if (!raw) return "";
+	const digits = raw.replace(/\D/g, "");
+	if (/^01\d{8}$/.test(digits)) return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+	if (/^01\d{9}$/.test(digits)) return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+	return raw;
+}
+
+function isValidKoreanMobilePhone(value) {
+	return !value || /^01\d-\d{3,4}-\d{4}$/.test(normalizeMobilePhone(value));
+}
+
+function markPendingRemoteSync() {
+	localStorage.setItem(PENDING_SYNC_KEY, String(Date.now()));
+}
+
+function clearPendingRemoteSync() {
+	localStorage.removeItem(PENDING_SYNC_KEY);
+	localStorage.removeItem(PENDING_MINIMUM_STUDY_KEY);
+}
+
+function hasPendingRemoteSync() {
+	return Boolean(localStorage.getItem(PENDING_SYNC_KEY));
+}
+
+function getPendingMinimumStudyUpdates() {
+	try {
+		const value = JSON.parse(localStorage.getItem(PENDING_MINIMUM_STUDY_KEY) || "[]");
+		return Array.isArray(value) ? new Set(value.map(String)) : new Set();
+	} catch {
+		return new Set();
+	}
+}
+
+function markPendingMinimumStudyUpdate(subjectId) {
+	if (!subjectId) return;
+	const pending = getPendingMinimumStudyUpdates();
+	pending.add(String(subjectId));
+	localStorage.setItem(PENDING_MINIMUM_STUDY_KEY, JSON.stringify([...pending]));
 }
 
 function closeBookMenus() {
@@ -408,6 +473,7 @@ function openBookMenu(menuButton) {
 }
 
 function getStateForSync() {
+	const pendingMinimumStudyUpdates = getPendingMinimumStudyUpdates();
 	return {
 		...state,
 		userSettings: normalizeUserSettings(state.userSettings),
@@ -417,12 +483,15 @@ function getStateForSync() {
 				Array.isArray(subjects)
 					? subjects.map((subject) => {
 							const scheduleTime = normalizeScheduleTime(subject.scheduleTime ?? subject.schedule_time);
+							const minimumStudyMinutes = readOptionalMinimumStudyMinutes(subject);
 							const scheduleDays = Array.isArray(subject.scheduleDays) ? subject.scheduleDays : subject.schedule_days || [];
 							return {
 								...subject,
 								subjectSettingId: subject.subjectSettingId ?? subject.subject_setting_id ?? "",
 								scheduleDays,
 								scheduleTime,
+								minimumStudyMinutes,
+								minimumStudyMinutesSource: pendingMinimumStudyUpdates.has(String(subject.id)) ? "book-dialog" : "",
 								startDate: subject.startDate ?? subject.start_date ?? "",
 								endDate: subject.endDate ?? subject.end_date ?? "",
 								rewardEnabled: Boolean(subject.rewardEnabled ?? subject.reward_enabled),
@@ -431,6 +500,8 @@ function getStateForSync() {
 								subject_setting_id: subject.subjectSettingId ?? subject.subject_setting_id ?? "",
 								schedule_days: scheduleDays,
 								schedule_time: scheduleTime,
+								minimum_study_minutes: minimumStudyMinutes,
+								minimum_study_minutes_source: pendingMinimumStudyUpdates.has(String(subject.id)) ? "book-dialog" : "",
 								start_date: subject.startDate ?? subject.start_date ?? "",
 								end_date: subject.endDate ?? subject.end_date ?? "",
 								reward_enabled: Boolean(subject.rewardEnabled ?? subject.reward_enabled),
@@ -453,6 +524,7 @@ function scheduleRemoteStateSync() {
 
 async function syncRemoteState() {
 	try {
+		clearTimeout(syncStateTimer);
 		setSyncStatus("서버에 저장 중");
 		const response = await fetch("/api/state", {
 			method: "PUT",
@@ -475,12 +547,31 @@ async function syncRemoteState() {
 			return false;
 		}
 		clearSensitiveFields();
+		clearPendingRemoteSync();
 		setSyncStatus("서버에 저장됨");
 		return true;
 	} catch (error) {
 		setSyncStatus("저장 실패", true);
 		console.warn("Failed to sync study state.", error);
 		return false;
+	}
+}
+
+function flushPendingRemoteState() {
+	if (!hasPendingRemoteSync() || isHydratingRemoteState) return;
+	clearTimeout(syncStateTimer);
+	try {
+		fetch("/api/state", {
+			method: "PUT",
+			headers: {
+				Authorization: `Bearer ${authToken}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ state: getStateForSync() }),
+			keepalive: true,
+		}).catch(() => {});
+	} catch {
+		// The pending marker remains, so the next load retries before pulling remote state.
 	}
 }
 
@@ -552,6 +643,16 @@ function isJsonResponse(response) {
 async function loadRemoteState() {
 	try {
 		setSyncStatus("서버 데이터 불러오는 중");
+		if (hasPendingRemoteSync()) {
+			const synced = await syncRemoteState();
+			if (!synced) {
+				render();
+				showPage(getPageAfterHydration());
+				promptForRequiredChildRegistration();
+				return;
+			}
+		}
+
 		const response = await fetch("/api/state", {
 			headers: {
 				Authorization: `Bearer ${authToken}`,
@@ -582,7 +683,7 @@ async function loadRemoteState() {
 		weekStart = getDefaultWeekStart();
 		localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 		render();
-		showPage(getStartupPage());
+		showPage(getPageAfterHydration());
 		promptForRequiredChildRegistration();
 		setSyncStatus("서버 데이터 불러옴");
 	} catch (error) {
@@ -633,7 +734,7 @@ async function handleInitialMigration() {
 
 function promptForRequiredChildRegistration() {
 	if (state.childAccounts.length > 0 || els.childAccountDialog.open) return;
-	openChildAccountDialog("", { required: true });
+	window.location.href = "./child.html?required=1";
 }
 
 function getMigrationKey() {
@@ -669,6 +770,63 @@ function clearSensitiveFields() {
 
 function setSyncStatus(text, isError = false) {
 	if (isError) console.warn(`[StudyFlow Sync] ${text}`);
+}
+
+function consumeAccessLogSkip() {
+	try {
+		const value = sessionStorage.getItem(ACCESS_LOG_SKIP_KEY);
+		if (!value) return false;
+		sessionStorage.removeItem(ACCESS_LOG_SKIP_KEY);
+		const createdAt = Number(value) || 0;
+		return createdAt > 0 && Date.now() - createdAt <= ACCESS_LOG_SKIP_TTL_MS;
+	} catch {
+		return false;
+	}
+}
+
+async function recordStartupAccessLog() {
+	const now = Date.now();
+	if (consumeAccessLogSkip()) {
+		lastAccessLogAt = now;
+		return;
+	}
+	if (now - lastAccessLogAt < ACCESS_LOG_THROTTLE_MS) return;
+	lastAccessLogAt = now;
+	try {
+		const response = await fetch("/api/auth/access-log", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${authToken}`,
+				...getClientHeaders(),
+			},
+		});
+		if (response.status === 401) {
+			logout();
+			return;
+		}
+		if (!response.ok) console.warn("Failed to record startup access log.");
+	} catch (error) {
+		console.warn("Failed to record startup access log.", error);
+	}
+}
+
+function getClientHeaders() {
+	if (!window.StudyFlowPush?.isNativeApp?.()) return {};
+	return {
+		"X-StudyFlow-Client": "mobile-app",
+		"X-StudyFlow-Platform": window.Capacitor?.getPlatform?.() || "app",
+	};
+}
+
+function setupNativeAccessLogEvents() {
+	const appPlugin = window.Capacitor?.Plugins?.App;
+	if (!appPlugin?.addListener || !window.StudyFlowPush?.isNativeApp?.()) return;
+	appPlugin.addListener("resume", () => {
+		recordStartupAccessLog();
+	});
+	appPlugin.addListener("appStateChange", (state) => {
+		if (state?.isActive) recordStartupAccessLog();
+	});
 }
 
 function logout() {
@@ -792,6 +950,7 @@ function render() {
 	renderMyPage();
 	renderSubjectsPage();
 	renderSettingsPage();
+	renderAccessLogsPage();
 }
 
 function renderProfile() {
@@ -814,8 +973,22 @@ function getStartupPage() {
 	return userSettings.startupScreenMode === "last" ? getSavedPage("weekly") : "weekly";
 }
 
+function consumeLoginStartupRequest() {
+	try {
+		const requested = sessionStorage.getItem(TEACHER_LOGIN_STARTUP_KEY) === "1";
+		if (requested) sessionStorage.removeItem(TEACHER_LOGIN_STARTUP_KEY);
+		return requested;
+	} catch {
+		return false;
+	}
+}
+
+function getPageAfterHydration() {
+	return consumeLoginStartupRequest() ? getStartupPage() : getSavedPage("weekly");
+}
+
 function getStorablePage(page) {
-	return ["subjects", "settings"].includes(page) ? "mypage" : page;
+	return ["subjects", "settings", "accesslogs"].includes(page) ? "mypage" : page;
 }
 
 function showPage(page) {
@@ -827,7 +1000,7 @@ function showPage(page) {
 	if (els.topbarThemeSlot) {
 		els.topbarThemeSlot.hidden = nextPage !== "mypage";
 	}
-	const navPage = ["subjects", "settings"].includes(nextPage) ? "mypage" : nextPage;
+	const navPage = ["subjects", "settings", "accesslogs"].includes(nextPage) ? "mypage" : nextPage;
 	els.navItems.forEach((item) => {
 		item.classList.toggle("active", item.dataset.targetPage === navPage);
 	});
@@ -854,6 +1027,10 @@ function setupNativeBackButton() {
 	if (!isNativeApp() || !appPlugin?.addListener) return;
 
 	appPlugin.addListener("backButton", () => {
+		if (window.StudyFlowAppLock?.isLocked?.()) {
+			appPlugin.exitApp();
+			return;
+		}
 		if (closeOpenDialogForBack()) return;
 		if (activePage !== "weekly") {
 			showPage("weekly");
@@ -935,6 +1112,9 @@ function renderTimeSelects() {
 	const minuteOptions = `<option value="">분</option>${Array.from({ length: 6 }, (_, index) => index * 10)
 		.map((minute) => `<option value="${String(minute).padStart(2, "0")}">${String(minute).padStart(2, "0")}분</option>`)
 		.join("")}`;
+	const minimumStudyOptions = `<option value="0">미설정</option>${Array.from({ length: 12 }, (_, index) => (index + 1) * 10)
+		.map((minute) => `<option value="${minute}">${formatMinimumStudyMinutes(minute)}</option>`)
+		.join("")}`;
 
 	[
 		[els.scheduleHour, hourOptions],
@@ -950,6 +1130,22 @@ function renderTimeSelects() {
 		if (!select || select.options.length) return;
 		select.innerHTML = options;
 	});
+	[
+		[els.entryMinimumStudyMinutes, minimumStudyOptions],
+		[els.minimumStudyMinutes, minimumStudyOptions],
+		[els.editMinimumStudyMinutes, minimumStudyOptions],
+	].forEach(([select, options]) => {
+		if (!select || select.options.length) return;
+		select.innerHTML = options;
+	});
+}
+
+function getEntryMinimumStudyMinutes(entry, subject) {
+	if (entry && entry.minimumStudyMinutes !== undefined && entry.minimumStudyMinutes !== null) {
+		const entryMinutes = normalizeMinimumStudyMinutes(entry.minimumStudyMinutes);
+		if (entryMinutes || entry.amount || entry.memo || entry.completed) return entryMinutes;
+	}
+	return normalizeMinimumStudyMinutes(subject?.minimumStudyMinutes);
 }
 
 function renderSummary() {
@@ -1085,7 +1281,7 @@ function renderTable() {
                     </div>
                   </div>
                 </div>
-                <span class="book-schedule">${escapeHtml(formatSchedule(subject))}</span>
+                <span class="book-schedule">${escapeHtml(formatSchedule(subject, { includeMinimumStudy: false }))}</span>
                 <span class="book-period">${escapeHtml(formatBookPeriod(subject))}</span>
               </td>
               ${cells}
@@ -1501,12 +1697,91 @@ function renderMyPage() {
         </div>
         <span class="mypage-entry-arrow">›</span>
       </button>
+      <button class="mypage-entry-card" type="button" data-target-page="accesslogs">
+        <div class="mypage-entry-info">
+          <strong>접속 로그</strong>
+          <p>최근 6개월간 계정 접속 기록</p>
+        </div>
+        <span class="mypage-entry-arrow">›</span>
+      </button>
     </div>
   `;
 
 	if (typeof applyTheme === "function" && typeof getSavedTheme === "function") {
 		applyTheme(getSavedTheme());
 	}
+}
+
+function renderAccessLogList() {
+	if (accessLogsLoading) return `<div class="empty-state compact">접속 로그를 불러오는 중입니다.</div>`;
+	if (!accessLogs.length) return `<div class="empty-state compact">표시할 접속 로그가 없습니다.</div>`;
+	return accessLogs
+		.map((log) => {
+			return `
+        <article class="access-log-item">
+          <div>
+            <strong>${escapeHtml(formatAccessLogDate(log.createdAt))}</strong>
+            <p>${escapeHtml(log.ipAddress || "IP 정보 없음")}</p>
+          </div>
+          <span>${escapeHtml(formatUserAgent(log.userAgent))}</span>
+        </article>
+      `;
+		})
+		.join("");
+}
+
+function updateAccessLogPanel() {
+	if (els.accessLogsContent) els.accessLogsContent.innerHTML = renderAccessLogList();
+	const button = els.accessLogsSection?.querySelector("[data-access-log-refresh]");
+	if (button) button.disabled = accessLogsLoading;
+}
+
+async function loadAccessLogs() {
+	if (accessLogsLoading) return;
+	accessLogsLoading = true;
+	updateAccessLogPanel();
+	try {
+		const response = await fetch("/api/auth/access-logs?limit=30", {
+			headers: { Authorization: `Bearer ${authToken}` },
+		});
+		if (!isJsonResponse(response)) throw new Error("StudyFlow API 응답이 아닙니다.");
+		if (response.status === 401) {
+			logout();
+			return;
+		}
+		if (!response.ok) throw new Error("접속 로그를 불러오지 못했습니다.");
+		const data = await response.json();
+		accessLogs = Array.isArray(data.logs) ? data.logs : [];
+	} catch (error) {
+		console.warn("Failed to load access logs.", error);
+		accessLogs = [];
+	} finally {
+		accessLogsLoading = false;
+		updateAccessLogPanel();
+	}
+}
+
+function formatAccessLogDate(value) {
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return "-";
+	return new Intl.DateTimeFormat("ko-KR", {
+		month: "2-digit",
+		day: "2-digit",
+		hour: "2-digit",
+		minute: "2-digit",
+		hour12: false,
+	}).format(date);
+}
+
+function formatUserAgent(value) {
+	const agent = String(value || "");
+	if (!agent) return "브라우저 정보 없음";
+	if (agent.startsWith("StudyFlow Mobile App")) return "모바일앱";
+	if (agent.includes("Edg/")) return "Microsoft Edge";
+	if (agent.includes("Chrome/")) return "Chrome";
+	if (agent.includes("Safari/")) return "Safari";
+	if (agent.includes("Firefox/")) return "Firefox";
+	return agent.slice(0, 80);
 }
 
 function shouldShowWebPushPanel() {
@@ -1629,6 +1904,7 @@ function renderSettingsPage() {
 	els.startupScreenModeInputs.forEach((input) => {
 		input.checked = input.value === userSettings.startupScreenMode;
 	});
+	window.StudyFlowAppLock?.renderSettings(els.teacherAppLockSettings);
 }
 
 function updateWeekStartMode(mode) {
@@ -1708,6 +1984,8 @@ function openChildAccountDialog(accountId = "", options = {}) {
 	els.childAccountDialog.classList.toggle("is-required-registration", isForcingChildRegistration);
 	els.childAccountName.value = account?.name || "";
 	els.childBirthMonth.value = toBirthInputValue(account?.birthMonth || "");
+	els.childPhone.value = account?.phone || "";
+	els.childParentPhone.value = account?.parentPhone || "";
 	els.childLoginId.value = account?.loginId || "";
 	els.childLoginId.readOnly = Boolean(account?.loginId);
 	els.childLoginId.classList.toggle("is-readonly", Boolean(account?.loginId));
@@ -1736,6 +2014,8 @@ function saveChildAccount(event) {
 	event.preventDefault();
 	const name = els.childAccountName.value.trim();
 	const birthMonth = els.childBirthMonth.value;
+	const phone = normalizeMobilePhone(els.childPhone.value);
+	const parentPhone = normalizeMobilePhone(els.childParentPhone.value);
 	const existingAccount = activeChildEdit ? state.childAccounts.find((item) => item.id === activeChildEdit.id) : null;
 	const existingLoginId = existingAccount?.loginId || "";
 	const loginId = existingLoginId || els.childLoginId.value.trim();
@@ -1744,6 +2024,16 @@ function saveChildAccount(event) {
 	const editingId = activeChildEdit?.id || "";
 
 	if (!name) return;
+	if (!isValidKoreanMobilePhone(phone)) {
+		alert("학생 휴대폰은 01n-nnnn-nnnn 형식으로 입력하세요.");
+		focusDialogField(els.childPhone);
+		return;
+	}
+	if (!isValidKoreanMobilePhone(parentPhone)) {
+		alert("학부모 휴대폰은 01n-nnnn-nnnn 형식으로 입력하세요.");
+		focusDialogField(els.childParentPhone);
+		return;
+	}
 	if (state.childAccounts.some((account) => account.id !== editingId && account.name === name)) {
 		alert("이미 등록된 학생 이름입니다.");
 		return;
@@ -1779,6 +2069,8 @@ function saveChildAccount(event) {
 		renameChildData(activeChildEdit.originalName, name);
 		account.name = name;
 		account.birthMonth = birthMonth;
+		account.phone = phone;
+		account.parentPhone = parentPhone;
 		account.loginId = existingLoginId || loginId;
 		if (password) account.password = password;
 	} else {
@@ -1786,6 +2078,8 @@ function saveChildAccount(event) {
 			id: crypto.randomUUID(),
 			name,
 			birthMonth,
+			phone,
+			parentPhone,
 			loginId,
 			password,
 		});
@@ -1984,6 +2278,7 @@ function openEntryDialog(button) {
 	els.entryMeta.textContent = `${date} · ${child}`;
 	els.entryTitle.textContent = `${subject.name} / ${subject.book}`;
 	els.entryAmount.value = entry?.amount || "";
+	els.entryMinimumStudyMinutes.value = String(getEntryMinimumStudyMinutes(entry, subject));
 	els.entryMemo.value = entry?.memo || "";
 	els.entryCompleted.checked = Boolean(entry?.completed);
 	if (els.entryCompletedInfo) {
@@ -2003,13 +2298,14 @@ function openEntryDialog(button) {
 function saveEntry() {
 	if (!activeEntry) return;
 	const amount = els.entryAmount.value.trim();
+	const minimumStudyMinutes = normalizeMinimumStudyMinutes(els.entryMinimumStudyMinutes.value);
 	const memo = els.entryMemo.value.trim();
 	const completed = els.entryCompleted.checked;
 	let savedEntry = null;
 	let shouldSyncEntry = false;
 	let shouldNotifyManualSchedule = false;
 
-	if (!amount && !memo && !completed) {
+	if (!amount && !memo && !completed && !minimumStudyMinutes) {
 		delete state.entries[activeEntry.key];
 	} else {
 		const subject = getSubjectsForChild(activeEntry.child).find((item) => item.id === activeEntry.subjectId);
@@ -2020,13 +2316,14 @@ function saveEntry() {
 		}
 
 		const previousEntry = state.entries[activeEntry.key] || {};
-		shouldNotifyManualSchedule = !completed && Boolean(amount || memo) && !previousEntry.planned && !previousEntry.amount && !previousEntry.memo && !previousEntry.completed;
+		shouldNotifyManualSchedule = !completed && Boolean(amount || memo || minimumStudyMinutes) && !previousEntry.planned && !previousEntry.amount && !previousEntry.memo && !previousEntry.completed;
 		const reward = getRewardForCompletedEntry(subject, completed, previousEntry);
 
 		savedEntry = {
 			...previousEntry,
 			...activeEntry,
 			amount,
+			minimumStudyMinutes,
 			memo,
 			completed,
 			rewardAwarded: reward.awarded,
@@ -2145,6 +2442,7 @@ function openBookDialog(child, subjectId) {
 	els.editSubjectName.value = getSubjectSetting(subject)?.id || "";
 	els.editBookName.value = subject.book;
 	setTimeSelectValue(els.editScheduleHour, els.editScheduleMinute, subject.scheduleTime || "");
+	els.editMinimumStudyMinutes.value = String(normalizeMinimumStudyMinutes(subject.minimumStudyMinutes));
 	els.editBookStartDate.value = subject.startDate || "";
 	els.editBookEndDate.value = subject.endDate || "";
 	els.editRegeneratePlan.checked = false;
@@ -2188,6 +2486,9 @@ function saveBookEdit(event) {
 	subject.book = book;
 	subject.scheduleDays = getSelectedScheduleDays("editScheduleDay");
 	subject.scheduleTime = getTimeSelectValue(els.editScheduleHour, els.editScheduleMinute);
+	subject.minimumStudyMinutes = normalizeMinimumStudyMinutes(els.editMinimumStudyMinutes.value);
+	delete subject.minimumStudyMinutesExplicit;
+	markPendingMinimumStudyUpdate(subject.id);
 	subject.startDate = els.editBookStartDate.value;
 	subject.endDate = els.editBookEndDate.value;
 	subject.rewardEnabled = rewardEnabled;
@@ -2341,6 +2642,7 @@ function copyBook(event) {
 		book: sourceSubject.book,
 		scheduleDays: [...(sourceSubject.scheduleDays || [])],
 		scheduleTime: normalizeScheduleTime(sourceSubject.scheduleTime),
+		minimumStudyMinutes: normalizeMinimumStudyMinutes(sourceSubject.minimumStudyMinutes),
 		startDate: startDate,
 		endDate: calculateCopiedEndDate(startDate, getEntriesForBook(activeCopy.child, activeCopy.subjectId).length),
 		rewardEnabled: Boolean(sourceSubject.rewardEnabled),
@@ -2364,6 +2666,7 @@ function copyBook(event) {
 			rewardAmount: 0,
 			rewardLabel: normalizeRewardLabel(copiedSubject.rewardLabel),
 			rewardRedeemed: false,
+			minimumStudyMinutes: normalizeMinimumStudyMinutes(entry.minimumStudyMinutes ?? copiedSubject.minimumStudyMinutes),
 			copiedFrom: {
 				child: activeCopy.child,
 				subjectId: activeCopy.subjectId,
@@ -2387,6 +2690,7 @@ function addSubject(event) {
 	const book = els.bookName.value.trim();
 	const scheduleDays = getSelectedScheduleDays("scheduleDay");
 	const scheduleTime = getTimeSelectValue(els.scheduleHour, els.scheduleMinute);
+	const minimumStudyMinutes = normalizeMinimumStudyMinutes(els.minimumStudyMinutes.value);
 	const startDate = els.bookStartDate.value;
 	const endDate = els.bookEndDate.value;
 	const shouldAutoCreatePlan = Boolean(els.autoCreatePlan?.checked);
@@ -2414,12 +2718,14 @@ function addSubject(event) {
 		book,
 		scheduleDays,
 		scheduleTime,
+		minimumStudyMinutes,
 		startDate,
 		endDate,
 		rewardEnabled,
 		rewardAmount,
 		rewardLabel,
 	};
+	markPendingMinimumStudyUpdate(subject.id);
 
 	state.subjectsByChild[child].push(subject);
 	if (shouldAutoCreatePlan) {
@@ -2430,6 +2736,7 @@ function addSubject(event) {
 	els.subjectName.value = subjectSetting.id;
 	setSelectedScheduleDays("scheduleDay", scheduleDays);
 	setTimeSelectValue(els.scheduleHour, els.scheduleMinute, scheduleTime);
+	els.minimumStudyMinutes.value = String(minimumStudyMinutes);
 	els.rewardLabel.value = rewardLabel;
 	els.subjectDialog.close();
 	saveState();
@@ -2653,6 +2960,30 @@ function normalizeScheduleTime(value) {
 	return `${String(hour).padStart(2, "0")}:${String(Math.floor(minute / 10) * 10).padStart(2, "0")}`;
 }
 
+function normalizeMinimumStudyMinutes(value) {
+	const minutes = Number.parseInt(value, 10) || 0;
+	if (minutes === 0) return 0;
+	if (minutes < 10 || minutes > 120) return 0;
+	return Math.floor(minutes / 10) * 10;
+}
+
+function readOptionalMinimumStudyMinutes(value) {
+	if (!value || typeof value !== "object") return null;
+	if (value.minimumStudyMinutes !== undefined && value.minimumStudyMinutes !== null) return normalizeMinimumStudyMinutes(value.minimumStudyMinutes);
+	if (value.minimum_study_minutes !== undefined && value.minimum_study_minutes !== null) return normalizeMinimumStudyMinutes(value.minimum_study_minutes);
+	return null;
+}
+
+function formatMinimumStudyMinutes(value) {
+	const minutes = normalizeMinimumStudyMinutes(value);
+	if (!minutes) return "최소 시간 미설정";
+	const hours = Math.floor(minutes / 60);
+	const rest = minutes % 60;
+	if (hours && rest) return `${hours}시간 ${rest}분`;
+	if (hours) return `${hours}시간`;
+	return `${rest}분`;
+}
+
 function formatScheduleDays(days) {
 	if (!days?.length) return "";
 	const selected = dayNames.filter((day) => days.includes(day));
@@ -2663,12 +2994,14 @@ function formatScheduleDays(days) {
 	return joined;
 }
 
-function formatSchedule(subject) {
+function formatSchedule(subject, options = {}) {
 	const days = formatScheduleDays(subject.scheduleDays);
 	const time = normalizeScheduleTime(subject.scheduleTime);
-	if (!days && !time) return "수업 일정 미설정";
-	if (days && time) return `${days} · ${time}`;
-	return days || time;
+	const minimumStudy = normalizeMinimumStudyMinutes(subject.minimumStudyMinutes);
+	const scheduleText = days && time ? `${days} · ${time}` : days || time || "수업 일정 미설정";
+	if (options.includeMinimumStudy === false) return scheduleText;
+	if (!minimumStudy) return scheduleText;
+	return `${scheduleText} · 최소 ${formatMinimumStudyMinutes(minimumStudy)}`;
 }
 
 function formatShortDate(value) {
@@ -2969,7 +3302,14 @@ if (els.weekSearch) {
 }
 
 if (els.weekChildAdd) {
-	els.weekChildAdd.addEventListener("click", () => openChildAccountDialog());
+	els.weekChildAdd.addEventListener("click", () => {
+		window.location.href = "./child.html";
+	});
+}
+
+function renderAccessLogsPage() {
+	if (!els.accessLogsContent) return;
+	els.accessLogsContent.innerHTML = renderAccessLogList();
 }
 
 els.navItems.forEach((item) => {
@@ -3015,11 +3355,26 @@ function handleSubjectClick(event) {
 els.subjectsSection.addEventListener("click", handleSubjectClick);
 
 els.settingsSection.addEventListener("click", (event) => {
+	if (window.StudyFlowAppLock?.handleSettingsClick(event, renderSettingsPage)) return;
 	const backButton = event.target.closest("[data-target-page]");
 	if (backButton) showPage(backButton.dataset.targetPage);
 });
 
+els.accessLogsSection.addEventListener("click", (event) => {
+	const backButton = event.target.closest("[data-target-page]");
+	if (backButton) {
+		showPage(backButton.dataset.targetPage);
+		return;
+	}
+	const refreshButton = event.target.closest("[data-access-log-refresh]");
+	if (refreshButton) loadAccessLogs();
+});
+
 els.settingsSection.addEventListener("change", (event) => {
+	if (window.StudyFlowAppLock?.handleSettingsChange(event)) {
+		renderSettingsPage();
+		return;
+	}
 	const weekStartModeInput = event.target.closest("[data-week-start-mode]");
 	if (weekStartModeInput?.checked) {
 		updateWeekStartMode(weekStartModeInput.value);
@@ -3093,7 +3448,7 @@ els.weeklyTable.addEventListener("click", (event) => {
 
 	const childEditButton = event.target.closest("[data-weekly-child-edit]");
 	if (childEditButton) {
-		openChildAccountDialog(childEditButton.dataset.weeklyChildEdit);
+		window.location.href = `./child.html?id=${encodeURIComponent(childEditButton.dataset.weeklyChildEdit || "")}`;
 		return;
 	}
 
@@ -3105,7 +3460,7 @@ els.weeklyTable.addEventListener("click", (event) => {
 
 	const bookDialogButton = event.target.closest("[data-weekly-open-book-dialog]");
 	if (bookDialogButton) {
-		openSubjectDialogForChild(bookDialogButton.dataset.weeklyOpenBookDialog);
+		window.location.href = `./book.html?child=${encodeURIComponent(bookDialogButton.dataset.weeklyOpenBookDialog || "")}`;
 		return;
 	}
 
@@ -3121,7 +3476,7 @@ els.weeklyTable.addEventListener("click", (event) => {
 	const editButton = event.target.closest(".edit-book");
 	if (editButton) {
 		closeBookMenus();
-		openBookDialog(editButton.dataset.child, editButton.dataset.subjectId);
+		window.location.href = `./book.html?child=${encodeURIComponent(editButton.dataset.child || "")}&subjectId=${encodeURIComponent(editButton.dataset.subjectId || "")}`;
 		return;
 	}
 
@@ -3144,6 +3499,7 @@ els.weeklyTable.addEventListener("click", (event) => {
 });
 window.addEventListener("resize", closeBookMenus);
 window.addEventListener("scroll", closeBookMenus, true);
+window.addEventListener("pagehide", flushPendingRemoteState);
 els.historySearch.addEventListener("input", renderHistory);
 els.historyChild.addEventListener("change", renderHistory);
 els.historySubjectSetting.addEventListener("change", renderHistory);
@@ -3199,8 +3555,18 @@ els.printTimetable.addEventListener("click", () => window.print());
 if (els.logoutButton) els.logoutButton.addEventListener("click", logout);
 
 render();
-showPage(getStartupPage());
+showPage(getSavedPage("weekly"));
 setupNativeBackButton();
+setupNativeAccessLogEvents();
+window.StudyFlowAppLock?.init({
+	role: "teacher",
+	accountId: authUser.id || authUser.email || "anonymous",
+	accountName: authUser.name || authUser.email || "StudyFlow",
+	isNativeApp,
+	onLogout: logout,
+});
+renderSettingsPage();
+recordStartupAccessLog().finally(() => loadAccessLogs());
 loadRemoteState();
 refreshPushState();
 registerNativePushIfAvailable();

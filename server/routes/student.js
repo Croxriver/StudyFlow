@@ -25,6 +25,12 @@ function toTimeText(value) {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
+function normalizeMinimumStudyMinutes(value) {
+  const minutes = Number.parseInt(value, 10) || 0;
+  if (minutes < 10 || minutes > 120) return 0;
+  return Math.floor(minutes / 10) * 10;
+}
+
 function toIsoText(value) {
   if (!value) return "";
   if (value instanceof Date) return value.toISOString();
@@ -57,6 +63,7 @@ function buildStudentState(recordsets) {
     book: book.book,
     scheduleDays: scheduleDaysByBook.get(String(book.id)) || [],
     scheduleTime: toTimeText(book.scheduleTime),
+    minimumStudyMinutes: normalizeMinimumStudyMinutes(book.minimumStudyMinutes),
     startDate: toDateText(book.startDate),
     endDate: toDateText(book.endDate),
     rewardEnabled: Boolean(book.rewardEnabled),
@@ -64,16 +71,19 @@ function buildStudentState(recordsets) {
     rewardLabel: book.rewardLabel || "포인트"
   }));
 
+  const subjectsById = new Map(subjects.map((subject) => [subject.id, subject]));
   const entries = {};
   entryRows.forEach((entry) => {
     const date = toDateText(entry.studyDate);
     const subjectId = String(entry.bookId);
+    const subject = subjectsById.get(subjectId);
     const key = entryKey(subjectId, date);
     entries[key] = {
       key,
       subjectId,
       date,
       amount: entry.amount || "",
+      minimumStudyMinutes: normalizeMinimumStudyMinutes(entry.minimumStudyMinutes) || normalizeMinimumStudyMinutes(subject?.minimumStudyMinutes),
       memo: entry.memo || "",
       completed: Boolean(entry.completed),
       rewardAwarded: Boolean(entry.rewardAwarded),
@@ -165,6 +175,7 @@ router.put("/entries", requireAuth, requireStudent, async (request, response, ne
         subjectId: String(entry.bookId),
         date: studyDate,
         amount: entry.amount || "",
+        minimumStudyMinutes: normalizeMinimumStudyMinutes(entry.minimumStudyMinutes),
         memo: entry.memo || "",
         completed: Boolean(entry.completed),
         rewardAwarded: Boolean(entry.rewardAwarded),

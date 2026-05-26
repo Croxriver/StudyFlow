@@ -214,7 +214,24 @@
 									</label>
 								</div>
 							</div>
+							<div class="profile-panel settings-panel settings-choice-panel app-lock-settings-panel" id="teacherAppLockSettings"></div>
 						</div>
+					</section>
+				</section>
+
+				<section class="page-view" id="accessLogsPage" data-page="accesslogs">
+					<section class="mypage-section" aria-label="접속 로그">
+						<div class="section-heading">
+							<div>
+								<h2>접속 로그</h2>
+								<p>최근 6개월간의 선생님 계정 접속 기록을 확인하세요.</p>
+							</div>
+						</div>
+						<div class="subpage-actions">
+							<button class="ghost subpage-back" type="button" data-target-page="mypage">‹ 마이페이지</button>
+							<button type="button" data-access-log-refresh>새로고침</button>
+						</div>
+						<div class="mypage-content" id="accessLogsContent"></div>
 					</section>
 				</section>
 
@@ -253,6 +270,10 @@
 				<label>
 					<span>학습량</span>
 					<input id="entryAmount" placeholder="예: 12쪽, 30분, 2강" />
+				</label>
+				<label>
+					<span>최소 학습 시간</span>
+					<select id="entryMinimumStudyMinutes"></select>
 				</label>
 				<label>
 					<span>메모</span>
@@ -329,6 +350,10 @@
 						<select id="scheduleHour" aria-label="수업 시간 시"></select>
 						<select id="scheduleMinute" aria-label="수업 시간 분"></select>
 					</div>
+				</label>
+				<label>
+					<span>최소 학습 시간</span>
+					<select id="minimumStudyMinutes"></select>
 				</label>
 				<div class="date-pair">
 					<label>
@@ -430,6 +455,10 @@
 						<select id="editScheduleMinute" aria-label="수업 시간 분"></select>
 					</div>
 				</label>
+				<label>
+					<span>최소 학습 시간</span>
+					<select id="editMinimumStudyMinutes"></select>
+				</label>
 				<div class="date-pair">
 					<label>
 						<span>교재 시작일</span>
@@ -484,6 +513,14 @@
 				<label>
 					<span>생일</span>
 					<input id="childBirthMonth" type="date" />
+				</label>
+				<label>
+					<span>학생 휴대폰</span>
+					<input id="childPhone" type="tel" inputmode="tel" maxlength="13" placeholder="예: 010-1234-5678" />
+				</label>
+				<label>
+					<span>학부모 휴대폰</span>
+					<input id="childParentPhone" type="tel" inputmode="tel" maxlength="13" placeholder="예: 010-1234-5678" />
 				</label>
 				<label>
 					<span>학생 아이디</span>
@@ -566,6 +603,7 @@
 		</dialog>
 
 		<script src="./push-client.js"></script>
+		<script src="./app-lock.js"></script>
 		<script src="./app.js"></script>
 	</body>
 </html>

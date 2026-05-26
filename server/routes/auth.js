@@ -79,6 +79,35 @@ function createStudentToken(student) {
   );
 }
 
+function getClientIp(request) {
+  const forwardedFor = String(request.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  return forwardedFor || request.ip || request.socket?.remoteAddress || "";
+}
+
+function getAccessLogUserAgent(request) {
+  const client = String(request.headers["x-studyflow-client"] || "").trim();
+  if (client === "mobile-app") {
+    const platform = String(request.headers["x-studyflow-platform"] || "").trim();
+    return platform ? `StudyFlow Mobile App (${platform})` : "StudyFlow Mobile App";
+  }
+  return String(request.headers["user-agent"] || "");
+}
+
+async function recordAccessLog(pool, request, { userId = null, childId = null, role, loginId = "" }) {
+  try {
+    await pool.request()
+      .input("user_id", sql.UniqueIdentifier, userId)
+      .input("child_id", sql.UniqueIdentifier, childId)
+      .input("role", sql.NVarChar(20), role)
+      .input("login_id", sql.NVarChar(255), String(loginId || "").trim())
+      .input("ip_address", sql.NVarChar(64), getClientIp(request).slice(0, 64))
+      .input("user_agent", sql.NVarChar(500), getAccessLogUserAgent(request).slice(0, 500))
+      .execute("dbo.app_create_access_log");
+  } catch (error) {
+    console.error("Failed to record access log", error);
+  }
+}
+
 router.post("/signup", async (request, response, next) => {
   try {
 		const { email, password, name, phone = "", phoneVerificationToken = "", emailVerificationToken = "", marketingConsent = false } = request.body || {};
@@ -284,6 +313,12 @@ router.post("/login", async (request, response, next) => {
       });
     }
 
+    await recordAccessLog(pool, request, {
+      userId: user.id,
+      role: "teacher",
+      loginId: user.email
+    });
+
     response.json({
       token: createToken(user),
       user: {
@@ -317,6 +352,13 @@ router.post("/student-login", async (request, response, next) => {
       });
     }
 
+    await recordAccessLog(pool, request, {
+      userId: student.teacherUserId,
+      childId: student.id,
+      role: "student",
+      loginId: student.loginId
+    });
+
     response.json({
       token: createStudentToken(student),
       user: {
@@ -328,6 +370,32 @@ router.post("/student-login", async (request, response, next) => {
         teacherName: student.teacherName
       }
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/access-log", requireAuth, async (request, response, next) => {
+  try {
+    const pool = await getPool();
+    const user = request.user || {};
+
+    if (user.role === "student") {
+      await recordAccessLog(pool, request, {
+        userId: user.teacherUserId,
+        childId: user.childId || user.sub,
+        role: "student",
+        loginId: user.loginId
+      });
+    } else {
+      await recordAccessLog(pool, request, {
+        userId: user.sub,
+        role: "teacher",
+        loginId: user.email
+      });
+    }
+
+    response.json({ ok: true });
   } catch (error) {
     next(error);
   }
@@ -394,6 +462,30 @@ router.get("/me", requireAuth, requireTeacher, async (request, response, next) =
         marketingConsent: Boolean(user.marketingConsent),
         role: "teacher"
       }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/access-logs", requireAuth, requireTeacher, async (request, response, next) => {
+  try {
+    const limit = Number.parseInt(request.query.limit, 10) || 30;
+    const pool = await getPool();
+    const result = await pool.request()
+      .input("user_id", sql.UniqueIdentifier, request.user.sub)
+      .input("limit", sql.Int, limit)
+      .execute("dbo.app_get_access_logs");
+
+    response.json({
+      logs: result.recordset.map((log) => ({
+        id: log.id,
+        role: log.role,
+        loginId: log.loginId || "",
+        ipAddress: log.ipAddress || "",
+        userAgent: log.userAgent || "",
+        createdAt: log.createdAt
+      }))
     });
   } catch (error) {
     next(error);
