@@ -1,5 +1,6 @@
 node_modules/
 .env
+.enc
 secrets/firebase-service-account.json
 dist-iis/
 *.zip

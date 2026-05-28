@@ -11,13 +11,12 @@
     "build:iis": "node scripts/build-iis-deploy.js",
     "cap:sync": "cap sync",
     "cap:open:android": "cap open android",
-    "check": "node --check app.js && node --check app-lock.js && node --check auth.js && node --check book.js && node --check child.js && node --check profile.js && node --check student.js && node --check pwa-register.js && node --check push-client.js && node --check service-worker.js && node --check scripts/apply-procedures.js && node --check scripts/build-iis-deploy.js && node --check server/index.js && node --check server/db.js && node --check server/middleware/auth.js && node --check server/routes/auth.js && node --check server/routes/push.js && node --check server/routes/state.js && node --check server/routes/student.js"
+    "check": "node --check app.js && node --check auth.js && node --check book.js && node --check child.js && node --check entry.js && node --check profile.js && node --check student.js && node --check pwa-register.js && node --check push-client.js && node --check service-worker.js && node --check scripts/apply-procedures.js && node --check scripts/build-iis-deploy.js && node --check server/index.js && node --check server/db.js && node --check server/middleware/auth.js && node --check server/routes/auth.js && node --check server/routes/attachments.js && node --check server/routes/push.js && node --check server/routes/state.js && node --check server/routes/student.js && node --check server/services/aiAnalysis.js"
   },
   "keywords": [],
   "author": "",
   "license": "UNLICENSED",
   "dependencies": {
-    "@aparajita/capacitor-biometric-auth": "^10.0.0",
     "@capacitor/android": "^8.3.4",
     "@capacitor/app": "^8.1.0",
     "@capacitor/core": "^8.3.4",
@@ -29,6 +28,9 @@
     "firebase-admin": "^13.10.0",
     "jsonwebtoken": "^9.0.3",
     "mssql": "^12.5.2",
+    "multer": "^2.1.1",
+    "nodemailer": "^8.0.9",
+    "openai": "^6.39.0",
     "web-push": "^3.6.7"
   },
   "devDependencies": {

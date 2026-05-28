@@ -33,6 +33,7 @@ const els = {
 
 let toastTimer = null;
 let originalPhone = "";
+let currentTeacherComment = "";
 const phoneVerificationState = {
   phone: "",
   token: ""
@@ -118,8 +119,9 @@ function syncPhoneVerificationUi() {
   if (!changed) {
     phoneVerificationState.phone = "";
     phoneVerificationState.token = "";
+    els.phoneVerification.hidden = true;
     els.phoneCodeFields.hidden = true;
-    els.phoneCodeSend.hidden = false;
+    els.phoneCodeSend.hidden = true;
     els.phoneCodeSend.disabled = false;
     els.phoneCode.value = "";
     setPhoneHelp("휴대폰 번호를 변경하려면 새 번호 인증이 필요합니다.");
@@ -127,12 +129,14 @@ function syncPhoneVerificationUi() {
   }
 
   if (verified) {
+    els.phoneVerification.hidden = false;
     els.phoneCodeFields.hidden = true;
     els.phoneCodeSend.hidden = true;
     setPhoneHelp("휴대폰 인증이 완료되었습니다.", true);
     return;
   }
 
+  els.phoneVerification.hidden = false;
   els.phoneCodeSend.hidden = false;
   setPhoneHelp("휴대폰 번호를 변경하려면 새 번호 인증이 필요합니다.");
 }
@@ -202,6 +206,9 @@ function updateLocalProfile(user) {
       email: user.email,
       phone: user.phone || "",
       marketingConsent: Boolean(user.marketingConsent),
+      plan: user.plan || state.profile?.plan || {},
+      servicePeriod: user.servicePeriod || state.profile?.servicePeriod || {},
+      teacherComment: user.teacherComment || state.profile?.teacherComment || "",
       password: ""
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -221,6 +228,7 @@ function renderProfile(user) {
   phoneVerificationState.token = "";
   els.password.value = "";
   els.marketingConsent.checked = Boolean(user.marketingConsent);
+  currentTeacherComment = user.teacherComment || "";
   syncPhoneVerificationUi();
 }
 
@@ -264,6 +272,7 @@ async function saveProfile(event) {
         phone: normalizedPhone,
         phoneVerificationToken: phoneVerificationState.token,
         password: els.password.value.trim(),
+        teacherComment: currentTeacherComment,
         marketingConsent: els.marketingConsent.checked
       })
     });
@@ -300,7 +309,8 @@ async function sendProfilePhoneCode() {
   els.phoneCodeFields.hidden = false;
   els.phoneCode.value = "";
   startPhoneCooldown(result.expiresInSeconds);
-  setPhoneHelp(result.verificationCode ? `인증번호를 발급했습니다. 개발 인증번호: ${result.verificationCode}` : "인증번호를 발송했습니다.");
+  setPhoneHelp("문자로 받은 6자리 인증번호를 입력하세요.");
+  setMessage("인증번호를 발송했습니다.");
   els.phoneCode.focus();
 }
 
@@ -329,7 +339,7 @@ async function verifyProfilePhoneCode() {
   els.phoneCodeSend.hidden = true;
   els.phone.readOnly = true;
   els.phone.classList.add("is-locked");
-  setPhoneHelp("휴대폰 인증이 완료되었습니다.", true);
+  setPhoneHelp("저장 버튼을 눌러 변경을 완료하세요.", true);
   setMessage("휴대폰 인증이 완료되었습니다.");
 }
 

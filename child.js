@@ -23,6 +23,7 @@ const els = {
 	birthMonth: document.querySelector("#childPageBirthMonth"),
 	phone: document.querySelector("#childPagePhone"),
 	parentPhone: document.querySelector("#childPageParentPhone"),
+	status: document.querySelector("#childPageStatus"),
 	loginId: document.querySelector("#childPageLoginId"),
 	verifyLoginId: document.querySelector("#childPageVerifyLoginId"),
 	loginIdHelp: document.querySelector("#childPageLoginIdHelp"),
@@ -119,6 +120,10 @@ function normalizeBirthValue(value) {
 	return String(value || "").slice(0, 10);
 }
 
+function normalizeChildStatus(value) {
+	return String(value || "") === "hidden" ? "hidden" : "active";
+}
+
 function sortChildAccountsByBirth(accounts) {
 	return [...accounts].sort((a, b) => {
 		const byBirth = normalizeBirthValue(a.birthMonth).localeCompare(normalizeBirthValue(b.birthMonth));
@@ -129,32 +134,31 @@ function sortChildAccountsByBirth(accounts) {
 
 function normalizeChildAccounts(value = {}) {
 	const savedAccounts = Array.isArray(value.childAccounts) ? value.childAccounts : [];
-	const names = [...savedAccounts.map((account) => account?.name), ...Object.keys(value.subjectsByChild || {})]
-		.map((name) => String(name || "").trim())
-		.filter(Boolean);
-	const uniqueNames = [...new Set(names)];
-
 	return sortChildAccountsByBirth(
-		uniqueNames.map((name) => {
-			const saved = savedAccounts.find((account) => account?.name === name) || {};
-			return {
+		savedAccounts
+			.map((saved) => ({
 				id: saved.id || crypto.randomUUID(),
-				name,
+				name: String(saved.name || "").trim(),
 				birthMonth: saved.birthMonth || "",
 				phone: normalizeMobilePhone(saved.phone),
 				parentPhone: normalizeMobilePhone(saved.parentPhone),
+				status: normalizeChildStatus(saved.status),
 				loginId: saved.loginId || "",
 				password: saved.password || "",
-			};
-		}),
+			}))
+			.filter((account) => account.name),
 	);
 }
 
 function normalizeState(value = {}) {
 	const childAccounts = normalizeChildAccounts(value);
-	const subjectsByChild = Object.fromEntries(childAccounts.map((child) => [child.name, []]));
-	Object.entries(value.subjectsByChild || {}).forEach(([child, subjects]) => {
-		if (subjectsByChild[child]) subjectsByChild[child] = Array.isArray(subjects) ? subjects : [];
+	const subjectsByChild = Object.fromEntries(childAccounts.map((child) => [child.id, []]));
+	const nameCounts = new Map();
+	childAccounts.forEach((child) => nameCounts.set(child.name, (nameCounts.get(child.name) || 0) + 1));
+	childAccounts.forEach((child) => {
+		const legacySubjects = nameCounts.get(child.name) === 1 ? value.subjectsByChild?.[child.name] : null;
+		const subjects = value.subjectsByChild?.[child.id] || legacySubjects || [];
+		subjectsByChild[child.id] = Array.isArray(subjects) ? subjects : [];
 	});
 	return {
 		...value,
@@ -173,14 +177,38 @@ function getAccount() {
 	return state.childAccounts.find((account) => account.id === activeChildId);
 }
 
+function getStudentLimit() {
+	return Number(state?.profile?.plan?.studentLimit || 0);
+}
+
+function getPlanName() {
+	return state?.profile?.plan?.name || "베이직";
+}
+
+function canAddChildAccount() {
+	const limit = getStudentLimit();
+	if (isServiceExpired()) return false;
+	return limit <= 0 || state.childAccounts.length < limit;
+}
+
+function isServiceExpired() {
+	const endsAt = state?.profile?.servicePeriod?.endsAt;
+	if (!endsAt) return false;
+	const expiresAt = new Date(endsAt);
+	return !Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() < Date.now();
+}
+
+function getStudentLimitMessage() {
+	if (isServiceExpired()) return "이용기간이 만료되어 학생을 추가할 수 없습니다.";
+	return `현재 ${getPlanName()} 플랜은 학생 ${getStudentLimit()}명까지 등록할 수 있습니다.`;
+}
+
 function focusField(field) {
 	field?.focus();
 }
 
 function renameChildData(oldName, newName) {
 	if (oldName === newName) return;
-	state.subjectsByChild[newName] = state.subjectsByChild[oldName] || [];
-	delete state.subjectsByChild[oldName];
 	Object.values(state.entries).forEach((entry) => {
 		if (entry.child === oldName) entry.child = newName;
 	});
@@ -209,6 +237,7 @@ function renderForm() {
 	els.birthMonth.value = account?.birthMonth || "";
 	els.phone.value = account?.phone || "";
 	els.parentPhone.value = account?.parentPhone || "";
+	els.status.value = normalizeChildStatus(account?.status);
 	els.loginId.value = account?.loginId || "";
 	els.loginId.readOnly = Boolean(account?.loginId);
 	els.loginId.classList.toggle("is-readonly", Boolean(account?.loginId));
@@ -219,6 +248,10 @@ function renderForm() {
 	els.password.value = "";
 	els.passwordConfirm.value = "";
 	els.submit.textContent = isEdit ? "저장" : "등록";
+	els.submit.disabled = !isEdit && !requiredRegistration && !canAddChildAccount();
+	if (!isEdit && !requiredRegistration && !canAddChildAccount()) {
+		setMessage(getStudentLimitMessage(), true);
+	}
 }
 
 async function loadState() {
@@ -262,6 +295,7 @@ async function saveChild(event) {
 	const birthMonth = els.birthMonth.value;
 	const phone = normalizeMobilePhone(els.phone.value);
 	const parentPhone = normalizeMobilePhone(els.parentPhone.value);
+	const status = normalizeChildStatus(els.status.value);
 	const loginId = existingLoginId || els.loginId.value.trim();
 	const password = els.password.value.trim();
 	const passwordConfirm = els.passwordConfirm.value.trim();
@@ -269,6 +303,10 @@ async function saveChild(event) {
 	if (!name) {
 		setMessage("학생 이름을 입력하세요.", true);
 		focusField(els.name);
+		return;
+	}
+	if (!account && !canAddChildAccount()) {
+		setMessage(getStudentLimitMessage(), true);
 		return;
 	}
 	if (!isValidKoreanMobilePhone(phone)) {
@@ -279,11 +317,6 @@ async function saveChild(event) {
 	if (!isValidKoreanMobilePhone(parentPhone)) {
 		setMessage("학부모 휴대폰은 01n-nnnn-nnnn 형식으로 입력하세요.", true);
 		focusField(els.parentPhone);
-		return;
-	}
-	if (state.childAccounts.some((child) => child.id !== editingId && child.name === name)) {
-		setMessage("이미 등록된 학생 이름입니다.", true);
-		focusField(els.name);
 		return;
 	}
 	if (loginId && state.childAccounts.some((child) => child.id !== editingId && child.loginId === loginId)) {
@@ -315,24 +348,26 @@ async function saveChild(event) {
 	try {
 		els.submit.disabled = true;
 		if (account) {
-			renameChildData(originalName, name);
 			account.name = name;
 			account.birthMonth = birthMonth;
 			account.phone = phone;
 			account.parentPhone = parentPhone;
+			account.status = status;
 			account.loginId = existingLoginId || loginId;
 			if (password) account.password = password;
 		} else {
-			state.childAccounts.push({
+			const newAccount = {
 				id: crypto.randomUUID(),
 				name,
 				birthMonth,
 				phone,
 				parentPhone,
+				status,
 				loginId,
 				password,
-			});
-			state.subjectsByChild[name] = [];
+			};
+			state.childAccounts.push(newAccount);
+			state.subjectsByChild[newAccount.id] = [];
 		}
 		state.childAccounts = sortChildAccountsByBirth(state.childAccounts);
 		await saveRemoteState();

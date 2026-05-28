@@ -214,7 +214,6 @@
 									</label>
 								</div>
 							</div>
-							<div class="profile-panel settings-panel settings-choice-panel app-lock-settings-panel" id="teacherAppLockSettings"></div>
 						</div>
 					</section>
 				</section>
@@ -248,6 +247,8 @@
 				</section>
 			</main>
 		</div>
+
+		<div class="profile-toast" id="teacherToast" role="status" aria-live="polite"></div>
 
 		<nav class="bottom-nav" aria-label="화면 이동">
 			<button class="nav-item active" type="button" data-target-page="weekly">주간 학습</button>
@@ -295,6 +296,18 @@
 					<div>
 						<span>학생 메모</span>
 						<p id="entryStudentFeedback">-</p>
+					</div>
+					<div class="entry-attachments-block" id="entryAttachmentsBlock" hidden>
+						<span>첨부 사진</span>
+						<div class="entry-attachment-list" id="entryAttachmentList"></div>
+						<div class="entry-ai-panel" id="entryAiPanel" hidden>
+							<div class="entry-ai-head">
+								<span>AI 분석</span>
+								<button class="ghost" id="entryAnalyzeButton" type="button">AI 분석</button>
+							</div>
+							<p class="entry-ai-note" id="entryAiStatus">분석 전</p>
+							<div class="entry-ai-result" id="entryAiResult" hidden></div>
+						</div>
 					</div>
 				</section>
 				<div class="dialog-actions entry-dialog-actions">
@@ -602,8 +615,96 @@
 			</form>
 		</dialog>
 
+		<dialog id="planDialog">
+			<form method="dialog" id="planForm">
+				<div class="dialog-head">
+					<div>
+						<p class="eyebrow">Subscription</p>
+						<h3>요금제 변경</h3>
+					</div>
+					<button class="icon-btn" type="button" id="closePlanDialog" aria-label="닫기">×</button>
+				</div>
+				<div class="plan-option-list" id="planOptions"></div>
+				<p class="form-message" id="planChangeMessage"></p>
+				<div class="dialog-actions">
+					<button class="ghost" type="button" id="cancelPlanDialog">취소</button>
+					<button type="submit" id="savePlanChange">변경</button>
+				</div>
+			</form>
+		</dialog>
+
+		<dialog id="paymentTermDialog">
+			<form method="dialog" id="paymentTermForm">
+				<div class="dialog-head">
+					<div>
+						<p class="eyebrow">Period</p>
+						<h3>이용기간 선택</h3>
+					</div>
+					<button class="icon-btn" type="button" id="closePaymentTermDialog" aria-label="닫기">×</button>
+				</div>
+				<div class="plan-option-list" id="paymentTermOptions"></div>
+				<div class="dialog-actions">
+					<button class="ghost" type="button" id="cancelPaymentTermDialog">취소</button>
+					<button type="submit" id="confirmPaymentTerm">다음</button>
+				</div>
+			</form>
+		</dialog>
+
+		<dialog id="innopayMethodDialog">
+			<div class="dialog-head">
+				<div>
+					<p class="eyebrow">Payment</p>
+					<h3>결제수단 선택</h3>
+				</div>
+				<button class="icon-btn" type="button" id="closeInnopayMethodDialog" aria-label="닫기">×</button>
+			</div>
+			<div class="plan-option-list">
+				<button class="plan-option pay-method-option" type="button" data-innopay-method="CARD">
+					<span class="pay-method-icon pay-method-card" aria-hidden="true"></span>
+					<span>
+						<strong>신용카드</strong>
+						<small>카드사 인증을 통해 결제합니다.</small>
+					</span>
+				</button>
+				<button class="plan-option pay-method-option" type="button" data-innopay-method="EPAY">
+					<span class="pay-method-icon pay-method-easy" aria-hidden="true"></span>
+					<span>
+						<strong>간편결제</strong>
+						<small>등록된 간편결제 서비스로 결제합니다.</small>
+					</span>
+				</button>
+			</div>
+		</dialog>
+
+		<dialog id="profilePhotoDialog">
+			<div class="dialog-head">
+				<div>
+					<p class="eyebrow">Profile</p>
+					<h3>프로필 사진</h3>
+				</div>
+				<button class="icon-btn" type="button" id="closeProfilePhotoDialog" aria-label="닫기">×</button>
+			</div>
+			<div class="profile-photo-option-list">
+				<button class="profile-photo-option" type="button" data-profile-photo-pick>
+					<span class="profile-photo-option-icon is-pick" aria-hidden="true"></span>
+					<span>
+						<strong>사진 찾기</strong>
+						<small>새 프로필 사진을 등록합니다.</small>
+					</span>
+				</button>
+				<button class="profile-photo-option" type="button" data-profile-photo-clear>
+					<span class="profile-photo-option-icon is-clear" aria-hidden="true"></span>
+					<span>
+						<strong>사진 초기화</strong>
+						<small>등록된 프로필 사진을 제거합니다.</small>
+					</span>
+				</button>
+			</div>
+		</dialog>
+
+		<script src="https://js.tosspayments.com/v2/standard"></script>
+		<script data-innopay-sdk src="https://pg.innopay.co.kr/tpay/js/v1/innopay.js"></script>
 		<script src="./push-client.js"></script>
-		<script src="./app-lock.js"></script>
 		<script src="./app.js"></script>
 	</body>
 </html>

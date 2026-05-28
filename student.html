@@ -49,6 +49,7 @@
           </div>
 
           <section class="student-plan-section" aria-label="오늘의 학습 목록">
+            <div class="student-teacher-message" id="studentTeacherMessage" hidden></div>
             <div class="student-plan-list" id="todayPlanList"></div>
           </section>
         </section>
@@ -136,8 +137,6 @@
                 <p class="form-message" id="studentPushMessage" role="status" aria-live="polite"></p>
               </section>
 
-              <section class="profile-panel student-setting-panel app-lock-settings-panel" id="studentAppLockSettings" aria-label="화면 잠금"></section>
-
             </div>
           </section>
         </section>
@@ -193,6 +192,9 @@
       </div>
     </section>
 
+    <input id="studentAttachmentPicker" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden>
+    <div class="profile-toast student-toast" id="studentToast" role="status" aria-live="polite"></div>
+
     <nav class="bottom-nav" aria-label="학생 화면 이동">
       <button class="nav-item active" type="button" data-target-page="today">오늘 학습</button>
       <button class="nav-item" type="button" data-target-page="week">주간 학습</button>
@@ -201,7 +203,6 @@
     </nav>
 
     <script src="./push-client.js"></script>
-    <script src="./app-lock.js"></script>
     <script src="./student.js"></script>
   </body>
 </html>

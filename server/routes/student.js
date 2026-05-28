@@ -37,6 +37,12 @@ function toIsoText(value) {
   return String(value);
 }
 
+function getProfileImageUrl(profileImagePath) {
+  const value = String(profileImagePath || "").trim().replaceAll("\\", "/");
+  if (!value) return "";
+  return `/uploads/profile-images/${value.split("/").map(encodeURIComponent).join("/")}`;
+}
+
 function entryKey(subjectId, date) {
   return `${subjectId}__${date}`;
 }
@@ -104,7 +110,9 @@ function buildStudentState(recordsets) {
       name: student.name,
       loginId: student.loginId || "",
       birthMonth: toDateText(student.birthMonth),
-      teacherName: student.teacherName
+      teacherName: student.teacherName,
+      teacherProfileImageUrl: getProfileImageUrl(student.teacherProfileImagePath),
+      teacherComment: student.teacherComment || ""
     },
     subjects,
     entries

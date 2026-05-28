@@ -154,6 +154,23 @@ function normalizeRewardLabel(value) {
 	return String(value || "").trim().slice(0, 20) || "포인트";
 }
 
+function isServiceExpired(profile = state?.profile) {
+	const plan = profile?.plan || {};
+	if (Number(plan.monthlyPrice || 0) <= 0) return false;
+	const endsAt = profile?.servicePeriod?.endsAt;
+	if (!endsAt) return false;
+	const expiresAt = new Date(endsAt);
+	if (Number.isNaN(expiresAt.getTime())) return false;
+	const restrictionStartsAt = new Date(expiresAt);
+	restrictionStartsAt.setDate(restrictionStartsAt.getDate() + 1);
+	restrictionStartsAt.setHours(0, 0, 0, 0);
+	return restrictionStartsAt.getTime() <= Date.now();
+}
+
+function getServiceExpiredMessage() {
+	return "이용기간이 만료되어 교재를 등록할 수 없습니다.";
+}
+
 function renderSelectOptions() {
 	const hourOptions = `<option value="">시</option>${Array.from({ length: 17 }, (_, index) => index + 6)
 		.map((hour) => `<option value="${String(hour).padStart(2, "0")}">${hour < 12 ? `오전 ${hour}시` : hour === 12 ? "오후 12시" : `오후 ${hour - 12}시`}</option>`)
@@ -172,11 +189,17 @@ function renderSelectOptions() {
 
 function normalizeState(value = {}) {
 	const childAccounts = Array.isArray(value.childAccounts) ? value.childAccounts : [];
-	const subjectsByChild = Object.fromEntries(childAccounts.map((child) => [child.name, []]));
-	Object.entries(value.subjectsByChild || {}).forEach(([child, subjects]) => {
-		subjectsByChild[child] = Array.isArray(subjects)
+	const subjectsByChild = Object.fromEntries(childAccounts.map((child) => [child.id || child.name, []]));
+	const nameCounts = new Map();
+	childAccounts.forEach((child) => nameCounts.set(child.name, (nameCounts.get(child.name) || 0) + 1));
+	childAccounts.forEach((child) => {
+		const childKey = child.id || child.name;
+		const legacySubjects = nameCounts.get(child.name) === 1 ? value.subjectsByChild?.[child.name] : null;
+		const subjects = value.subjectsByChild?.[childKey] || legacySubjects || [];
+		subjectsByChild[childKey] = Array.isArray(subjects)
 			? subjects.map((subject) => ({
 					...subject,
+					childId: childKey,
 					scheduleDays: Array.isArray(subject.scheduleDays) ? subject.scheduleDays : subject.schedule_days || [],
 					scheduleTime: normalizeScheduleTime(subject.scheduleTime ?? subject.schedule_time),
 					minimumStudyMinutes: normalizeMinimumStudyMinutes(subject.minimumStudyMinutes ?? subject.minimum_study_minutes),
@@ -257,6 +280,27 @@ function entryKey(child, subjectId, date) {
 	return `${child}__${subjectId}__${date}`;
 }
 
+function getChildKey(child) {
+	if (!child) return "";
+	if (typeof child === "object") return String(child.id || child.name || "").trim();
+	return String(child || "").trim();
+}
+
+function getChildName(childKey) {
+	const key = getChildKey(childKey);
+	return state.childAccounts.find((child) => getChildKey(child) === key)?.name || key;
+}
+
+function getChildNameCounts() {
+	const counts = new Map();
+	state.childAccounts.forEach((child) => counts.set(child.name, (counts.get(child.name) || 0) + 1));
+	return counts;
+}
+
+function getChildOptionLabel(child) {
+	return getChildNameCounts().get(child.name) > 1 ? `${child.name} (${child.birthMonth || String(child.id).slice(0, 4)})` : child.name;
+}
+
 function createAutoPlanEntries(child, subject) {
 	const plannedDays = new Set((subject.scheduleDays || []).map((day) => scheduleDayIndexes.get(day)).filter((day) => day !== undefined));
 	if (!plannedDays.size || !subject.startDate || !subject.endDate) return;
@@ -269,7 +313,8 @@ function createAutoPlanEntries(child, subject) {
 			const key = entryKey(child, subject.id, date);
 			if (!state.entries[key]) {
 				state.entries[key] = {
-					child,
+					childId: child,
+					child: getChildName(child),
 					subjectId: subject.id,
 					date,
 					key,
@@ -292,7 +337,7 @@ function createAutoPlanEntries(child, subject) {
 
 function deleteBlankPlanEntries(child, subjectId) {
 	Object.entries(state.entries).forEach(([key, entry]) => {
-		if (entry.child === child && entry.subjectId === subjectId && entry.planned && !entry.amount && !entry.memo && !entry.completed) {
+		if ((entry.childId || entry.child) === child && entry.subjectId === subjectId && entry.planned && !entry.amount && !entry.memo && !entry.completed) {
 			delete state.entries[key];
 		}
 	});
@@ -313,19 +358,22 @@ function markPendingMinimumStudyUpdate(subjectId) {
 
 function renderForm() {
 	const query = getQuery();
-	activeChild = query.get("child") || state.childAccounts[0]?.name || "";
+	activeChild = query.get("childId") || query.get("child") || getChildKey(state.childAccounts[0]) || "";
 	activeSubjectId = query.get("subjectId") || "";
 	mode = activeSubjectId ? "edit" : "add";
 	const subject = state.subjectsByChild[activeChild]?.find((item) => item.id === activeSubjectId);
+	const expiredAdd = mode === "add" && isServiceExpired();
 
 	els.title.textContent = mode === "edit" ? "교재 수정" : "교재 등록";
 	els.submit.textContent = mode === "edit" ? "저장" : "등록";
 	els.autoPlanText.textContent = mode === "edit" ? "저장 후 빈 가계획 다시 생성" : "기간과 요일에 맞춰 가계획 자동 생성";
 
-	els.child.innerHTML = state.childAccounts.map((child) => `<option value="${child.name}">${child.name}</option>`).join("");
+	els.child.innerHTML = state.childAccounts.map((child) => `<option value="${getChildKey(child)}">${getChildOptionLabel(child)}</option>`).join("");
 	els.subject.innerHTML = state.subjectSettings.map((item) => `<option value="${item.id}">${item.name}</option>`).join("");
 	els.child.value = activeChild;
 	els.child.disabled = mode === "edit";
+	els.submit.disabled = expiredAdd;
+	if (expiredAdd) setMessage(getServiceExpiredMessage(), true);
 
 	if (mode === "edit" && subject) {
 		els.subject.value = subject.subjectSettingId || "";
@@ -401,6 +449,7 @@ async function saveRemoteState() {
 
 async function saveBook(event) {
 	event.preventDefault();
+	if (mode === "add" && isServiceExpired()) return setMessage(getServiceExpiredMessage(), true);
 	const child = els.child.value;
 	const subjectSetting = state.subjectSettings.find((item) => item.id === els.subject.value);
 	const book = els.book.value.trim();

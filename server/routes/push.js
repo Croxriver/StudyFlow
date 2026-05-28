@@ -121,7 +121,7 @@ function normalizeEventPayload(body, user) {
   return {
     title,
     body: bodyParts.join("\n") || "StudyFlow 학습 알림",
-    url: buildWebAppUrl("index.html")
+    url: buildWebAppUrl("index.html?page=weekly")
   };
 }
 

@@ -2,8 +2,10 @@ const path = require("path");
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
+require("dotenv").config({ path: path.join(__dirname, "..", ".enc"), override: true });
 
 const authRoutes = require("./routes/auth");
+const attachmentRoutes = require("./routes/attachments");
 const pushRoutes = require("./routes/push");
 const stateRoutes = require("./routes/state");
 const studentRoutes = require("./routes/student");
@@ -24,6 +26,7 @@ app.get("/api/health", (_request, response) => {
 });
 
 app.use("/api/auth", authRoutes);
+app.use("/api/attachments", attachmentRoutes);
 app.use("/api/push", pushRoutes);
 app.use("/api/state", stateRoutes);
 app.use("/api/student", studentRoutes);
@@ -37,6 +40,22 @@ app.get(/^\/(?!api).*/, (_request, response) => {
 });
 
 function getPublicError(error) {
+  if (error?.name === "MulterError" || /Only jpg, png, and webp/.test(error?.message || "")) {
+    return {
+      status: 400,
+      error: "invalid_upload",
+      message: error.message || "Invalid upload request."
+    };
+  }
+
+  if (error?.publicMessage) {
+    return {
+      status: error.status || 500,
+      error: "request_failed",
+      message: error.publicMessage
+    };
+  }
+
   if (error?.name === "ConnectionError" || /로그인하지 못했습니다|Login failed/i.test(error?.message || "")) {
     return {
       status: 503,
@@ -54,6 +73,9 @@ function getPublicError(error) {
 
 app.use((error, _request, response, _next) => {
   console.error(error);
+  if (error?.innopayCancelAttempts) {
+    console.error("InnoPay cancel attempts", error.innopayCancelAttempts);
+  }
   const publicError = getPublicError(error);
   response.status(publicError.status).json({
     error: publicError.error,

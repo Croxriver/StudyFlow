@@ -1,0 +1,8 @@
+PAYMENT_PROVIDER=toss
+TOSS_PAYMENTS_CLIENT_KEY=test_ck_your-client-key
+TOSS_PAYMENTS_SECRET_KEY=test_sk_your-secret-key
+INNOPAY_MID=testpay01m
+INNOPAY_MERCHANT_KEY=your-innopay-merchant-key
+INNOPAY_PAY_METHOD=CARD
+INNOPAY_CANCEL_URL=https://api.innopay.co.kr/api/cancelApi
+INNOPAY_CANCEL_PASSWORD=your-innopay-cancel-password

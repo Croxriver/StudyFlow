@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#2f9d62">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="StudyFlow">
+    <title>학습량 입력 | StudyFlow</title>
+    <script src="./theme.js"></script>
+    <script defer src="./pwa-register.js"></script>
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" href="./assets/studyflow-icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body class="profile-page entry-page">
+    <div class="profile-page-shell">
+      <header class="profile-page-head">
+        <div>
+          <div class="profile-title-row">
+            <a class="profile-title-back" href="./index.html" aria-label="주간 학습으로 돌아가기">
+              <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                <path d="M15 18 9 12l6-6"></path>
+              </svg>
+            </a>
+            <h1 id="entryPageTitle">학습량 입력</h1>
+          </div>
+        </div>
+      </header>
+
+      <main class="profile-edit-layout entry-edit-layout">
+        <form class="profile-edit-form entry-edit-form" id="entryPageForm">
+          <section class="profile-edit-section entry-edit-section" aria-label="학습량 정보">
+            <h2 id="entryPageSubject">학습 기록</h2>
+            <div class="entry-page-meta" id="entryPageMeta">불러오는 중</div>
+
+            <div class="book-form-grid">
+              <label class="book-form-wide">
+                <span>학습량</span>
+                <input id="entryPageAmount" placeholder="예: 12쪽, 30분, 2강">
+              </label>
+              <label>
+                <span>최소 학습 시간</span>
+                <select id="entryPageMinimumStudyMinutes"></select>
+              </label>
+              <label class="check-row entry-page-check">
+                <input id="entryPageCompleted" type="checkbox">
+                <span>학습 완료</span>
+              </label>
+              <label class="book-form-wide">
+                <span>메모</span>
+                <textarea id="entryPageMemo" rows="5" placeholder="오답, 진도, 복습 내용 등을 적어두세요."></textarea>
+              </label>
+            </div>
+
+            <section class="entry-page-completed-section" id="entryPageCompletedInfo" hidden aria-label="완료된 학습 정보">
+              <h3>완료 정보</h3>
+              <div class="book-form-grid entry-page-completed-grid">
+                <label>
+                  <span>학습 시작 시간</span>
+                  <output id="entryPageStudyStartedAt">-</output>
+                </label>
+                <label>
+                  <span>진행 시간</span>
+                  <output id="entryPageStudyDuration">-</output>
+                </label>
+                <label class="book-form-wide">
+                  <span>학생 메모</span>
+                  <output id="entryPageStudentFeedback">-</output>
+                </label>
+              </div>
+              <div class="entry-attachments-block" id="entryPageAttachmentsBlock" hidden>
+                <span>첨부 사진</span>
+                <div class="entry-attachment-list" id="entryPageAttachmentList"></div>
+              </div>
+              <section class="entry-page-ai-section" id="entryPageAiPanel" hidden aria-label="AI 분석 결과">
+                <div class="entry-page-section-head">
+                  <h3>AI 분석</h3>
+                  <button class="ghost" id="entryPageAnalyzeButton" type="button">AI 분석</button>
+                </div>
+                <div class="book-form-grid entry-page-completed-grid">
+                  <label>
+                    <span>분석 상태</span>
+                    <output class="entry-ai-note" id="entryPageAiStatus">분석 전</output>
+                  </label>
+                  <label>
+                    <span>분석 시간</span>
+                    <output id="entryPageAiAnalyzedAt">-</output>
+                  </label>
+                  <label class="book-form-wide" id="entryPageAiResultWrap">
+                    <span>분석 결과</span>
+                    <output class="entry-ai-result" id="entryPageAiResult" hidden></output>
+                  </label>
+                </div>
+              </section>
+            </section>
+
+            <div class="profile-edit-actions entry-page-actions">
+              <a class="ghost" href="./index.html">목록</a>
+              <button type="submit" id="entryPageSubmit">저장</button>
+            </div>
+          </section>
+        </form>
+      </main>
+    </div>
+    <div class="entry-ai-progress" id="entryPageAiProgress" hidden role="alert" aria-live="assertive" aria-modal="true">
+      <div class="entry-ai-progress-panel">
+        <span aria-hidden="true"></span>
+        <strong>AI 분석 중</strong>
+        <p>AI가 첨부 사진을 분석하고 있습니다. 완료될 때까지 잠시 기다려 주세요.</p>
+      </div>
+    </div>
+    <div class="profile-toast" id="entryPageToast" role="status" aria-live="polite"></div>
+
+    <script src="./entry.js"></script>
+  </body>
+</html>

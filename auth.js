@@ -4,7 +4,6 @@ const AUTH_TOKEN_KEY_PREFIX = `${AUTH_TOKEN_KEY}:`;
 const AUTH_USER_KEY_PREFIX = `${AUTH_USER_KEY}:`;
 const TEACHER_LOGIN_STARTUP_KEY_PREFIX = "studyflow-teacher-login-startup:";
 const ACCESS_LOG_SKIP_KEY_PREFIX = "studyflow-access-log-skip:";
-const APP_LOCK_SKIP_KEY_PREFIX = "studyflow-app-lock-skip:";
 
 const form = document.querySelector("[data-auth-form]");
 const message = document.querySelector("[data-auth-message]");
@@ -16,6 +15,8 @@ const termsDialog = document.querySelector("#termsDialog");
 const termsDialogTitle = document.querySelector("#termsDialogTitle");
 const termsDialogFrame = document.querySelector("#termsDialogFrame");
 const closeTermsDialog = document.querySelector("#closeTermsDialog");
+let authMessageTimer = null;
+let forgotMessageTimer = null;
 const termsUrls = {
 	agree: "https://csid.kr/service/agreement/agree.html",
 	policy: "https://csid.kr/service/agreement/policy.html",
@@ -26,12 +27,26 @@ const signupState = {
 	email: "",
 	emailVerificationToken: "",
 };
+const resetState = {
+	method: "phone",
+	phone: "",
+	phoneVerificationToken: "",
+	email: "",
+	emailVerificationToken: "",
+};
 const verificationCooldownTimers = new Map();
 
 function setMessage(text, isError = false) {
 	if (!message) return;
+	clearTimeout(authMessageTimer);
 	message.textContent = text;
 	message.classList.toggle("is-error", isError);
+	message.classList.toggle("is-visible", Boolean(text));
+	if (text) {
+		authMessageTimer = setTimeout(() => {
+			message.classList.remove("is-visible");
+		}, isError ? 4000 : 2200);
+	}
 }
 
 function showOverlay() {
@@ -46,8 +61,15 @@ function hideOverlay() {
 
 function setForgotMessage(text, isError = false) {
 	if (!forgotPasswordMessage) return;
+	clearTimeout(forgotMessageTimer);
 	forgotPasswordMessage.textContent = text;
 	forgotPasswordMessage.classList.toggle("is-error", isError);
+	forgotPasswordMessage.classList.toggle("is-visible", Boolean(text));
+	if (text) {
+		forgotMessageTimer = setTimeout(() => {
+			forgotPasswordMessage.classList.remove("is-visible");
+		}, isError ? 4000 : 2200);
+	}
 }
 
 function getFormData() {
@@ -99,6 +121,14 @@ function startVerificationCooldown(button, seconds = 60) {
 	verificationCooldownTimers.set(button, timer);
 }
 
+function stopVerificationCooldown(button) {
+	if (!button) return;
+	clearInterval(verificationCooldownTimers.get(button));
+	verificationCooldownTimers.delete(button);
+	button.disabled = false;
+	button.textContent = button.dataset.originalText || button.textContent;
+}
+
 function lockVerificationTarget(input, button, seconds = 60) {
 	if (!input) return;
 	input.readOnly = true;
@@ -136,6 +166,17 @@ async function requestAuth(path, payload) {
 	}
 
 	return data;
+}
+
+function unlockVerificationTarget(input, button) {
+	if (!input) return;
+	input.readOnly = false;
+	input.classList.remove("is-locked");
+	const timer = button?.dataset.unlockTimer;
+	if (timer) {
+		clearTimeout(Number(timer));
+		delete button.dataset.unlockTimer;
+	}
 }
 
 function getClientHeaders() {
@@ -176,13 +217,6 @@ function markAccessLogSkip(user) {
 	if (!user?.role) return;
 	try {
 		sessionStorage.setItem(`${ACCESS_LOG_SKIP_KEY_PREFIX}${user.role}:${user.id || user.email || user.loginId || "anonymous"}`, String(Date.now()));
-	} catch {}
-}
-
-function markAppLockSkip(user) {
-	if (!user?.role) return;
-	try {
-		sessionStorage.setItem(`${APP_LOCK_SKIP_KEY_PREFIX}${user.role}:${user.id || user.email || user.loginId || "anonymous"}`, String(Date.now()));
 	} catch {}
 }
 
@@ -227,7 +261,6 @@ async function submitLogin(event) {
 	saveSession(result);
 	markTeacherLoginStartup(result.user);
 	markAccessLogSkip(result.user);
-	markAppLockSkip(result.user);
 	window.location.replace(result.user?.role === "student" ? "./student.html" : "./index.html");
 }
 
@@ -296,14 +329,17 @@ async function sendSignupPhoneCode() {
 	}
 
 	showOverlay();
-	const result = await requestAuth("/api/auth/signup/phone-code", { phone });
+	const result = await requestAuth("/api/auth/signup/phone-code", {
+		phone,
+		name: nameInput.value.trim(),
+	});
 	hideOverlay();
 	signupState.phone = phone;
 	signupState.phoneVerificationToken = "";
 	form.querySelector("[data-phone-code-fields]")?.removeAttribute("hidden");
 	startVerificationCooldown(sendButton, result.expiresInSeconds);
 	lockVerificationTarget(phoneInput, sendButton, result.expiresInSeconds);
-	setMessage(result.verificationCode ? `인증번호를 발급했습니다. 개발 인증번호: ${result.verificationCode}` : "인증번호를 발송했습니다.");
+	setMessage("인증번호를 발송했습니다.");
 	form.querySelector("input[name='phoneCode']")?.focus();
 }
 
@@ -354,7 +390,7 @@ async function sendSignupEmailCode() {
 	form.querySelector("[data-signup-account-fields]")?.setAttribute("hidden", "");
 	startVerificationCooldown(sendButton, result.expiresInSeconds);
 	lockVerificationTarget(emailInput, sendButton, result.expiresInSeconds);
-	setMessage(result.verificationCode ? `이메일 인증번호를 발급했습니다. 개발 인증번호: ${result.verificationCode}` : "이메일 인증번호를 발송했습니다.");
+	setMessage("이메일 인증번호를 발송했습니다.");
 	form.querySelector("input[name='emailCode']")?.focus();
 }
 
@@ -447,23 +483,140 @@ function openTermsDialog(type) {
 async function submitPasswordReset(event) {
 	event.preventDefault();
 	const data = Object.fromEntries(new FormData(forgotPasswordForm).entries());
+	const method = resetState.method || data.resetMethod || "phone";
+	const hasVerifiedPhone = method === "phone" && resetState.phoneVerificationToken;
+	const hasVerifiedEmail = method === "email" && resetState.emailVerificationToken;
 
 	if (data.resetPassword !== data.resetPasswordConfirm) {
 		setForgotMessage("새 비밀번호가 서로 일치하지 않습니다.", true);
 		return;
 	}
+	if (String(data.resetPassword || "").length < 4) {
+		setForgotMessage("새 비밀번호를 4자 이상 입력하세요.", true);
+		return;
+	}
+	if (!hasVerifiedPhone && !hasVerifiedEmail) {
+		setForgotMessage("휴대폰 또는 이메일 인증을 먼저 완료하세요.", true);
+		return;
+	}
 
-	setForgotMessage("가입 정보를 확인하는 중입니다...");
+	setForgotMessage("비밀번호를 변경하는 중입니다...");
 	await requestAuth("/api/auth/reset-password", {
 		email: data.resetEmail,
 		name: data.resetName,
 		phone: data.resetPhone,
 		password: data.resetPassword,
+		phoneVerificationToken: resetState.phoneVerificationToken,
+		emailVerificationToken: resetState.emailVerificationToken,
 	});
 
 	forgotPasswordForm.reset();
+	resetState.phone = "";
+	resetState.phoneVerificationToken = "";
+	resetState.email = "";
+	resetState.emailVerificationToken = "";
+	syncResetMethod();
 	setForgotMessage("비밀번호가 변경되었습니다. 새 비밀번호로 로그인하세요.");
 	setMessage("비밀번호가 변경되었습니다. 새 비밀번호로 로그인하세요.");
+}
+
+function getResetMethod() {
+	return new FormData(forgotPasswordForm).get("resetMethod") || "phone";
+}
+
+function syncResetMethod() {
+	if (!forgotPasswordForm) return;
+	const method = getResetMethod();
+	resetState.method = method;
+	const phonePanel = forgotPasswordForm.querySelector("[data-reset-phone-panel]");
+	const authFields = forgotPasswordForm.querySelector("[data-reset-auth-fields]");
+	const codeFields = forgotPasswordForm.querySelector("[data-reset-code-fields]");
+	const passwordFields = forgotPasswordForm.querySelector("[data-reset-password-fields]");
+	const submitButton = forgotPasswordForm.querySelector("[data-reset-submit]");
+	const phoneInput = forgotPasswordForm.querySelector("input[name='resetPhone']");
+	const sendButton = forgotPasswordForm.querySelector("[data-reset-code-send]");
+	const emailInput = forgotPasswordForm.querySelector("input[name='resetEmail']");
+	stopVerificationCooldown(sendButton);
+	unlockVerificationTarget(phoneInput, sendButton);
+	unlockVerificationTarget(emailInput, sendButton);
+	authFields?.removeAttribute("hidden");
+	if (phonePanel) phonePanel.hidden = method !== "phone";
+	if (phoneInput) phoneInput.required = method === "phone";
+	codeFields?.setAttribute("hidden", "");
+	passwordFields?.setAttribute("hidden", "");
+	if (submitButton) submitButton.disabled = true;
+	resetState.phoneVerificationToken = "";
+	resetState.emailVerificationToken = "";
+	setForgotMessage("");
+}
+
+async function sendPasswordResetCode() {
+	const data = Object.fromEntries(new FormData(forgotPasswordForm).entries());
+	const method = getResetMethod();
+	const sendButton = forgotPasswordForm.querySelector("[data-reset-code-send]");
+	const email = String(data.resetEmail || "").trim().toLowerCase();
+	const name = String(data.resetName || "").trim();
+	const phone = normalizePhone(data.resetPhone);
+
+	if (!forgotPasswordForm.querySelector("input[name='resetEmail']")?.checkValidity() || !name) {
+		setForgotMessage("가입 이메일과 이름을 입력하세요.", true);
+		return;
+	}
+	if (method === "phone" && !/^01\d{8,9}$/.test(phone)) {
+		setForgotMessage("휴대폰 번호를 정확히 입력하세요.", true);
+		return;
+	}
+
+	showOverlay();
+	const result = method === "phone"
+		? await requestAuth("/api/auth/reset-password/phone-code", { email, name, phone })
+		: await requestAuth("/api/auth/reset-password/email-code", { email, name });
+	hideOverlay();
+
+	resetState.method = method;
+	resetState.phone = phone;
+	resetState.email = email;
+	resetState.phoneVerificationToken = "";
+	resetState.emailVerificationToken = "";
+	forgotPasswordForm.querySelector("[data-reset-code-fields]")?.removeAttribute("hidden");
+	forgotPasswordForm.querySelector("[data-reset-password-fields]")?.setAttribute("hidden", "");
+	const submitButton = forgotPasswordForm.querySelector("[data-reset-submit]");
+	if (submitButton) submitButton.disabled = true;
+	startVerificationCooldown(sendButton, result.expiresInSeconds);
+	lockVerificationTarget(method === "phone" ? forgotPasswordForm.querySelector("input[name='resetPhone']") : forgotPasswordForm.querySelector("input[name='resetEmail']"), sendButton, result.expiresInSeconds);
+	setForgotMessage(method === "phone" ? "휴대폰 인증번호를 발송했습니다." : "이메일 인증번호를 발송했습니다.");
+	forgotPasswordForm.querySelector("input[name='resetCode']")?.focus();
+}
+
+async function verifyPasswordResetCode() {
+	const data = Object.fromEntries(new FormData(forgotPasswordForm).entries());
+	const method = getResetMethod();
+	const email = String(data.resetEmail || "").trim().toLowerCase();
+	const phone = normalizePhone(data.resetPhone);
+	const code = String(data.resetCode || "").trim();
+
+	if (!/^\d{6}$/.test(code)) {
+		setForgotMessage("6자리 인증번호를 입력하세요.", true);
+		return;
+	}
+
+	showOverlay();
+	const result = method === "phone"
+		? await requestAuth("/api/auth/reset-password/verify-phone", { phone, code })
+		: await requestAuth("/api/auth/reset-password/verify-email", { email, code });
+	hideOverlay();
+
+	resetState.method = method;
+	resetState.phone = phone;
+	resetState.email = email;
+	resetState.phoneVerificationToken = result.phoneVerificationToken || "";
+	resetState.emailVerificationToken = result.emailVerificationToken || "";
+	forgotPasswordForm.querySelector("[data-reset-password-fields]")?.removeAttribute("hidden");
+	forgotPasswordForm.querySelector("[data-reset-auth-fields]")?.setAttribute("hidden", "");
+	const submitButton = forgotPasswordForm.querySelector("[data-reset-submit]");
+	if (submitButton) submitButton.disabled = false;
+	setForgotMessage("인증이 완료되었습니다. 새 비밀번호를 입력하세요.");
+	forgotPasswordForm.querySelector("input[name='resetPassword']")?.focus();
 }
 
 function syncLoginMode() {
@@ -560,12 +713,34 @@ if (closeTermsDialog && termsDialog) {
 
 if (forgotPasswordButton && forgotPasswordDialog) {
 	forgotPasswordButton.addEventListener("click", () => {
+		forgotPasswordForm?.reset();
+		syncResetMethod();
 		setForgotMessage("");
 		forgotPasswordDialog.showModal();
 	});
 }
 
 if (forgotPasswordForm) {
+	syncResetMethod();
+	forgotPasswordForm.querySelectorAll("input[name='resetMethod']").forEach((input) => {
+		input.addEventListener("change", syncResetMethod);
+	});
+	forgotPasswordForm.querySelector("[data-reset-code-send]")?.addEventListener("click", async () => {
+		try {
+			await sendPasswordResetCode();
+		} catch (error) {
+			hideOverlay();
+			setForgotMessage(error.message || "인증번호를 발송하지 못했습니다.", true);
+		}
+	});
+	forgotPasswordForm.querySelector("[data-reset-code-verify]")?.addEventListener("click", async () => {
+		try {
+			await verifyPasswordResetCode();
+		} catch (error) {
+			hideOverlay();
+			setForgotMessage(error.message || "인증에 실패했습니다.", true);
+		}
+	});
 	forgotPasswordForm.addEventListener("submit", async (event) => {
 		if (event.submitter?.value === "cancel") return;
 		try {
@@ -573,5 +748,12 @@ if (forgotPasswordForm) {
 		} catch (error) {
 			setForgotMessage(error.message || "비밀번호를 재설정하지 못했습니다.", true);
 		}
+	});
+}
+
+if (forgotPasswordDialog && forgotPasswordForm) {
+	forgotPasswordDialog.addEventListener("close", () => {
+		forgotPasswordForm.reset();
+		syncResetMethod();
 	});
 }

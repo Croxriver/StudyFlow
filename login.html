@@ -66,7 +66,7 @@
 					</div>
 					<button class="icon-btn" value="cancel" type="submit" formnovalidate tabindex="-1" aria-label="닫기">×</button>
 				</div>
-				<p class="password-reset-help">선생님 계정은 가입 정보 확인 후 새 비밀번호로 변경할 수 있습니다.</p>
+				<p class="password-reset-help">가입 정보 확인 후 휴대폰 또는 이메일 인증을 완료하면 새 비밀번호로 변경할 수 있습니다.</p>
 				<label>
 					<span>이메일</span>
 					<input name="resetEmail" type="email" autocomplete="email" required placeholder="manager@example.com" />
@@ -75,18 +75,42 @@
 					<span>가입 이름</span>
 					<input name="resetName" required placeholder="가입 시 입력한 이름" />
 				</label>
-				<label>
-					<span>전화번호</span>
-					<input name="resetPhone" autocomplete="tel" placeholder="가입 시 입력한 전화번호" />
-				</label>
-				<label>
-					<span>새 비밀번호</span>
-					<input name="resetPassword" type="password" autocomplete="new-password" required placeholder="새 비밀번호" />
-				</label>
-				<label>
-					<span>새 비밀번호 확인</span>
-					<input name="resetPasswordConfirm" type="password" autocomplete="new-password" required placeholder="새 비밀번호 한 번 더 입력" />
-				</label>
+				<div class="reset-auth-fields" data-reset-auth-fields>
+				<div class="reset-method-switch" role="radiogroup" aria-label="인증 방법">
+					<label>
+						<input type="radio" name="resetMethod" value="phone" checked />
+						<span>휴대폰 인증</span>
+					</label>
+					<label>
+						<input type="radio" name="resetMethod" value="email" />
+						<span>이메일 인증</span>
+					</label>
+				</div>
+				<div data-reset-phone-panel>
+					<label>
+						<span>전화번호</span>
+						<input name="resetPhone" autocomplete="tel" placeholder="가입 시 입력한 전화번호" />
+					</label>
+				</div>
+				<button type="button" data-reset-code-send>인증번호 받기</button>
+				<div class="reset-code-fields" data-reset-code-fields hidden>
+					<label>
+						<span>인증번호</span>
+						<input name="resetCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6자리 인증번호" />
+					</label>
+					<button type="button" data-reset-code-verify>인증하기</button>
+				</div>
+				</div>
+				<div class="reset-password-fields" data-reset-password-fields hidden>
+					<label>
+						<span>새 비밀번호</span>
+						<input name="resetPassword" type="password" autocomplete="new-password" placeholder="새 비밀번호" />
+					</label>
+					<label>
+						<span>새 비밀번호 확인</span>
+						<input name="resetPasswordConfirm" type="password" autocomplete="new-password" placeholder="새 비밀번호 한 번 더 입력" />
+					</label>
+				</div>
 				<div class="student-reset-note">
 					<strong>학생 계정 비밀번호</strong>
 					<p>학생 비밀번호는 선생님이 마이페이지의 학생 계정 관리에서 새 비밀번호를 설정해 주세요.</p>
@@ -95,7 +119,7 @@
 				<div class="dialog-actions">
 					<span></span>
 					<button class="ghost" value="cancel" type="submit" formnovalidate>취소</button>
-					<button value="reset-password" type="submit">비밀번호 재설정</button>
+					<button value="reset-password" type="submit" data-reset-submit disabled>비밀번호 재설정</button>
 				</div>
 			</form>
 		</dialog>

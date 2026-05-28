@@ -63,6 +63,14 @@ function entryKey(child, subjectId, date) {
   return `${child}__${subjectId}__${date}`;
 }
 
+function getChildKey(child) {
+  return String(child?.id || child?.name || "").trim();
+}
+
+function normalizeChildStatus(value) {
+  return String(value || "") === "hidden" ? "hidden" : "active";
+}
+
 function buildStateFromRecordsets(recordsets) {
   const [profiles = [], childrenRows = [], settingRows = [], bookRows = [], dayRows = [], entryRows = [], userSettingRows = []] = recordsets;
   const profile = profiles[0];
@@ -83,15 +91,19 @@ function buildStateFromRecordsets(recordsets) {
     birthMonth: toDateText(child.birthMonth),
     phone: child.phone || "",
     parentPhone: child.parentPhone || "",
+    status: normalizeChildStatus(child.status),
     loginId: child.loginId || "",
     password: ""
   }));
 
-  const subjectsByChild = Object.fromEntries(childAccounts.map((child) => [child.name, []]));
+  const childNamesById = new Map(childAccounts.map((child) => [child.id, child.name]));
+  const subjectsByChild = Object.fromEntries(childAccounts.map((child) => [getChildKey(child), []]));
   bookRows.forEach((book) => {
-    subjectsByChild[book.childName] ||= [];
-    subjectsByChild[book.childName].push({
+    const childKey = String(book.childId || "");
+    subjectsByChild[childKey] ||= [];
+    subjectsByChild[childKey].push({
       id: String(book.id),
+      childId: childKey,
       subjectSettingId: String(book.subjectSettingId),
       name: book.subjectName,
       book: book.book,
@@ -109,10 +121,12 @@ function buildStateFromRecordsets(recordsets) {
   const entries = {};
   entryRows.forEach((entry) => {
     const date = toDateText(entry.studyDate);
-    const key = entryKey(entry.childName, String(entry.bookId), date);
+    const childId = String(entry.childId || "");
+    const key = entryKey(childId, String(entry.bookId), date);
     entries[key] = {
       key,
-      child: entry.childName,
+      childId,
+      child: childNamesById.get(childId) || entry.childName,
       subjectId: String(entry.bookId),
       date,
       amount: entry.amount || "",
@@ -144,7 +158,19 @@ function buildStateFromRecordsets(recordsets) {
       email: profile.email,
       password: "",
       phone: profile.phone || "",
-      marketingConsent: Boolean(profile.marketingConsent)
+      marketingConsent: Boolean(profile.marketingConsent),
+      plan: {
+        code: profile.planCode || "basic",
+        name: profile.planName || "",
+        monthlyPrice: Number(profile.monthlyPrice || 0),
+        studentLimit: Number(profile.studentLimit || 0)
+      },
+      servicePeriod: {
+        startedAt: profile.serviceStartedAt ? new Date(profile.serviceStartedAt).toISOString() : "",
+        endsAt: profile.serviceEndsAt ? new Date(profile.serviceEndsAt).toISOString() : ""
+      },
+      profileImageUrl: profile.profileImagePath ? `/uploads/profile-images/${String(profile.profileImagePath).replaceAll("\\", "/").split("/").map(encodeURIComponent).join("/")}` : "",
+      teacherComment: profile.teacherComment || ""
     },
     childAccounts,
     subjectsByChild,
@@ -185,13 +211,17 @@ async function normalizeStateForProcedure(state) {
       id: ensureUuid(child.id),
       phone: String(child.phone || "").trim(),
       parentPhone: String(child.parentPhone || "").trim(),
+      status: normalizeChildStatus(child.status),
       loginId: String(child.loginId || "").trim(),
       password: "",
       passwordHash: password ? await bcrypt.hash(password, 12) : null,
       sortOrder: index
     };
   }));
-  const childrenByName = new Map(children.map((child) => [child.name, child]));
+  const childrenById = new Map(children.map((child) => [String(child.id), child]));
+  const childNameCounts = new Map();
+  children.forEach((child) => childNameCounts.set(child.name, (childNameCounts.get(child.name) || 0) + 1));
+  const childrenByUniqueName = new Map(children.filter((child) => childNameCounts.get(child.name) === 1).map((child) => [child.name, child]));
 
   const subjectIdMap = new Map();
   const subjectNameMap = new Map();
@@ -210,8 +240,8 @@ async function normalizeStateForProcedure(state) {
 
   const bookIdMap = new Map();
   const books = [];
-  Object.entries(state.subjectsByChild || {}).forEach(([childName, subjects]) => {
-    const child = childrenByName.get(childName);
+  Object.entries(state.subjectsByChild || {}).forEach(([childKey, subjects]) => {
+    const child = childrenById.get(String(childKey)) || childrenByUniqueName.get(childKey);
     if (!child || !Array.isArray(subjects)) return;
 
     subjects.forEach((book) => {
@@ -219,7 +249,8 @@ async function normalizeStateForProcedure(state) {
       const subjectSettingId = subjectIdMap.get(book.subjectSettingId) || subjectNameMap.get(book.name);
       if (!subjectSettingId) return;
 
-      bookIdMap.set(`${childName}__${book.id}`, id);
+      bookIdMap.set(`${child.id}__${book.id}`, id);
+      bookIdMap.set(`${child.name}__${book.id}`, id);
       books.push({
         id,
         childId: child.id,
@@ -242,7 +273,7 @@ async function normalizeStateForProcedure(state) {
 
   const entriesList = Object.values(state.entries || {})
     .map((entry) => ({
-      bookId: bookIdMap.get(`${entry.child}__${entry.subjectId}`),
+      bookId: bookIdMap.get(`${entry.childId || entry.child}__${entry.subjectId}`),
       date: entry.date,
       amount: entry.amount || "",
       memo: entry.memo || "",
@@ -268,6 +299,63 @@ async function normalizeStateForProcedure(state) {
     books,
     entriesList
   };
+}
+
+async function getStudentLimit(pool, userId) {
+  const result = await pool.request()
+    .input("user_id", sql.UniqueIdentifier, userId)
+    .query(`
+      SELECT ISNULL(plan_info.student_limit, 0) AS studentLimit
+      FROM dbo.users u
+      LEFT JOIN dbo.subscription_plans plan_info ON plan_info.plan_code = u.plan_code
+      WHERE u.id = @user_id
+    `);
+  return Number(result.recordset[0]?.studentLimit || 0);
+}
+
+async function isServiceExpired(pool, userId) {
+  const result = await pool.request()
+    .input("user_id", sql.UniqueIdentifier, userId)
+    .query(`
+      SELECT
+        u.service_ends_at AS serviceEndsAt,
+        ISNULL(plan_info.monthly_price, 0) AS monthlyPrice
+      FROM dbo.users u
+      LEFT JOIN dbo.subscription_plans plan_info ON plan_info.plan_code = u.plan_code
+      WHERE u.id = @user_id
+    `);
+  const monthlyPrice = Number(result.recordset[0]?.monthlyPrice || 0);
+  if (monthlyPrice <= 0) return false;
+  const endsAt = result.recordset[0]?.serviceEndsAt;
+  if (!endsAt) return false;
+  const expiresAt = new Date(endsAt);
+  if (Number.isNaN(expiresAt.getTime())) return false;
+  const restrictionStartsAt = new Date(expiresAt);
+  restrictionStartsAt.setDate(restrictionStartsAt.getDate() + 1);
+  restrictionStartsAt.setHours(0, 0, 0, 0);
+  return restrictionStartsAt.getTime() <= Date.now();
+}
+
+function countRegisteredChildren(state) {
+  return Array.isArray(state?.childAccounts) ? state.childAccounts.filter((child) => String(child?.name || "").trim()).length : 0;
+}
+
+function countRegisteredBooks(state) {
+  return Object.values(state?.subjectsByChild || {}).reduce((count, subjects) => count + (Array.isArray(subjects) ? subjects.length : 0), 0);
+}
+
+async function getCurrentChildCount(pool, userId) {
+  const result = await pool.request()
+    .input("user_id", sql.UniqueIdentifier, userId)
+    .query("SELECT COUNT(1) AS childCount FROM dbo.children WHERE user_id = @user_id");
+  return Number(result.recordset[0]?.childCount || 0);
+}
+
+async function getCurrentBookCount(pool, userId) {
+  const result = await pool.request()
+    .input("user_id", sql.UniqueIdentifier, userId)
+    .query("SELECT COUNT(1) AS bookCount FROM dbo.books WHERE user_id = @user_id");
+  return Number(result.recordset[0]?.bookCount || 0);
 }
 
 router.get("/", requireAuth, requireTeacher, async (request, response, next) => {
@@ -306,6 +394,34 @@ router.put("/", requireAuth, requireTeacher, async (request, response, next) => 
 
   try {
     const pool = await getPool();
+    const studentLimit = await getStudentLimit(pool, request.user.sub);
+    const serviceExpired = await isServiceExpired(pool, request.user.sub);
+    const childCount = countRegisteredChildren(state);
+    const bookCount = countRegisteredBooks(state);
+    const currentChildCount = await getCurrentChildCount(pool, request.user.sub);
+    const currentBookCount = await getCurrentBookCount(pool, request.user.sub);
+
+    if (serviceExpired && childCount > currentChildCount) {
+      return response.status(403).json({
+        error: "service_expired",
+        message: "이용기간이 만료되어 학생을 추가할 수 없습니다."
+      });
+    }
+
+    if (serviceExpired && bookCount > currentBookCount) {
+      return response.status(403).json({
+        error: "service_expired",
+        message: "이용기간이 만료되어 교재를 등록할 수 없습니다."
+      });
+    }
+
+    if (studentLimit > 0 && childCount > studentLimit && childCount > currentChildCount) {
+      return response.status(403).json({
+        error: "student_limit_exceeded",
+        message: `현재 요금제는 학생 ${studentLimit}명까지 등록할 수 있습니다.`
+      });
+    }
+
     const normalizedState = await normalizeStateForProcedure(state);
     const result = await pool.request()
       .input("user_id", sql.UniqueIdentifier, request.user.sub)
@@ -373,6 +489,7 @@ router.put("/entries", requireAuth, requireTeacher, async (request, response, ne
   try {
     const {
       child,
+      childId = "",
       subjectId,
       date,
       amount = "",
@@ -391,7 +508,7 @@ router.put("/entries", requireAuth, requireTeacher, async (request, response, ne
     const hasMinimumStudyMinutes = Object.prototype.hasOwnProperty.call(request.body || {}, "minimumStudyMinutes");
     const minimumStudyMinutes = normalizeMinimumStudyMinutes(request.body?.minimumStudyMinutes);
 
-    if (!child || !subjectId || !date) {
+    if ((!child && !childId) || !subjectId || !date) {
       return response.status(400).json({
         error: "invalid_entry_request",
         message: "Child, subject, and date are required."
@@ -402,6 +519,7 @@ router.put("/entries", requireAuth, requireTeacher, async (request, response, ne
     const result = await pool.request()
       .input("user_id", sql.UniqueIdentifier, request.user.sub)
       .input("child_name", sql.NVarChar(100), String(child).trim())
+      .input("child_id", sql.UniqueIdentifier, childId || null)
       .input("book_id", sql.UniqueIdentifier, subjectId)
       .input("study_date", sql.Date, date)
       .input("amount", sql.NVarChar(200), String(amount || "").trim())
@@ -440,6 +558,7 @@ router.put("/entries", requireAuth, requireTeacher, async (request, response, ne
       .input("study_date", sql.Date, date)
       .query(`
         SELECT
+          se.child_id AS childId,
           c.name AS childName,
           se.book_id AS bookId,
           se.study_date AS studyDate,
@@ -467,7 +586,8 @@ router.put("/entries", requireAuth, requireTeacher, async (request, response, ne
 
     response.json({
       entry: {
-        key: entryKey(entry.childName, String(entry.bookId), studyDate),
+        key: entryKey(String(entry.childId || childId || entry.childName), String(entry.bookId), studyDate),
+        childId: String(entry.childId || childId || ""),
         child: entry.childName,
         subjectId: String(entry.bookId),
         date: studyDate,

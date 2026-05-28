@@ -28,6 +28,10 @@ let activeStudy = null;
 let studyTimer = null;
 let pushState = { supported: false, subscribed: false, permission: "default" };
 let lastAccessLogAt = 0;
+let pendingAttachmentStudy = null;
+let toastTimer = null;
+let attachmentPreviewUrls = new Map();
+let attachmentGalleryState = { items: [], index: 0, rotations: {}, zooms: {}, pointers: new Map(), dragStart: null, pinchStart: null, keyHandler: null };
 
 const els = {
 	pageViews: document.querySelectorAll(".page-view"),
@@ -38,7 +42,6 @@ const els = {
 	pushStatus: document.querySelector("#studentPushStatus"),
 	pushToggle: document.querySelector("#studentPushToggle"),
 	pushMessage: document.querySelector("#studentPushMessage"),
-	appLockSettings: document.querySelector("#studentAppLockSettings"),
 	topbarThemeSlot: document.querySelector("#studentTopbarThemeSlot"),
 	logout: document.querySelector("#studentLogout"),
 	rewardPageTotal: document.querySelector("#studentRewardPageTotal"),
@@ -48,6 +51,7 @@ const els = {
 	thisWeek: document.querySelector("#studentThisWeek"),
 	planFilter: document.querySelector("#studentPlanFilter"),
 	weekRange: document.querySelector("#studentWeekRange"),
+	teacherMessage: document.querySelector("#studentTeacherMessage"),
 	todayPlanList: document.querySelector("#todayPlanList"),
 	weekPlanList: document.querySelector("#weekPlanList"),
 	rewardHistory: document.querySelector("#studentRewardHistory"),
@@ -68,6 +72,8 @@ const els = {
 	studySessionFeedback: document.querySelector("#studySessionFeedback"),
 	studySessionComplete: document.querySelector("#studySessionComplete"),
 	studySessionCancel: document.querySelector("#studySessionCancel"),
+	studentAttachmentPicker: document.querySelector("#studentAttachmentPicker"),
+	studentToast: document.querySelector("#studentToast"),
 };
 
 const pageTitles = {
@@ -114,6 +120,208 @@ function parseStoredUser(value) {
 
 function setStatus(text, isError = false) {
 	if (isError) console.warn(`[StudyFlow Student] ${text}`);
+}
+
+function showStudentToast(text, isError = false) {
+	if (!els.studentToast) return;
+	window.clearTimeout(toastTimer);
+	els.studentToast.textContent = text;
+	els.studentToast.classList.toggle("is-error", isError);
+	els.studentToast.classList.add("is-visible");
+	toastTimer = window.setTimeout(() => {
+		els.studentToast.classList.remove("is-visible");
+	}, 2600);
+}
+
+function clearAttachmentPreviewUrls() {
+	attachmentPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
+	attachmentPreviewUrls = new Map();
+}
+
+function getAttachmentGallery() {
+	let gallery = document.querySelector("#attachmentGallery");
+	if (gallery) return gallery;
+	gallery = document.createElement("div");
+	gallery.id = "attachmentGallery";
+	gallery.className = "attachment-gallery";
+	gallery.hidden = true;
+	gallery.innerHTML = `
+    <div class="attachment-gallery-backdrop" data-gallery-close></div>
+    <div class="attachment-gallery-panel" role="dialog" aria-modal="true" aria-label="첨부 사진 보기">
+      <button class="attachment-gallery-close" type="button" data-gallery-close aria-label="닫기">×</button>
+      <button class="attachment-gallery-nav attachment-gallery-prev" type="button" data-gallery-prev aria-label="이전 사진">‹</button>
+      <img class="attachment-gallery-image" alt="">
+      <button class="attachment-gallery-nav attachment-gallery-next" type="button" data-gallery-next aria-label="다음 사진">›</button>
+      <div class="attachment-gallery-caption">
+        <strong data-gallery-title></strong>
+        <span data-gallery-count></span>
+      </div>
+      <div class="attachment-gallery-tools" aria-label="사진 보기 도구">
+        <button type="button" data-gallery-rotate-left aria-label="왼쪽으로 회전"><span>↺</span><b>왼쪽 회전</b></button>
+        <button type="button" data-gallery-rotate-right aria-label="오른쪽으로 회전"><span>↻</span><b>오른쪽 회전</b></button>
+        <button type="button" data-gallery-zoom-out aria-label="축소"><span>−</span><b>축소</b></button>
+        <button type="button" data-gallery-zoom-reset aria-label="원본 크기"><span>1:1</span><b>원본</b></button>
+        <button type="button" data-gallery-zoom-in aria-label="확대"><span>+</span><b>확대</b></button>
+      </div>
+    </div>
+  `;
+	document.body.appendChild(gallery);
+	gallery.addEventListener("click", (event) => {
+		if (event.target.closest("[data-gallery-close]")) closeAttachmentGallery();
+		if (event.target.closest("[data-gallery-prev]")) moveAttachmentGallery(-1);
+		if (event.target.closest("[data-gallery-next]")) moveAttachmentGallery(1);
+		if (event.target.closest("[data-gallery-rotate-left]")) rotateAttachmentGallery(-90);
+		if (event.target.closest("[data-gallery-rotate-right]")) rotateAttachmentGallery(90);
+		if (event.target.closest("[data-gallery-zoom-out]")) zoomAttachmentGallery(-0.25);
+		if (event.target.closest("[data-gallery-zoom-in]")) zoomAttachmentGallery(0.25);
+		if (event.target.closest("[data-gallery-zoom-reset]")) resetAttachmentGalleryZoom();
+	});
+	gallery.addEventListener("pointerdown", handleAttachmentGalleryPointerDown);
+	gallery.addEventListener("pointermove", handleAttachmentGalleryPointerMove);
+	gallery.addEventListener("pointerup", handleAttachmentGalleryPointerUp);
+	gallery.addEventListener("pointercancel", handleAttachmentGalleryPointerUp);
+	return gallery;
+}
+
+function updateAttachmentGallery() {
+	const gallery = getAttachmentGallery();
+	const item = attachmentGalleryState.items[attachmentGalleryState.index];
+	const image = gallery.querySelector(".attachment-gallery-image");
+	const title = gallery.querySelector("[data-gallery-title]");
+	const count = gallery.querySelector("[data-gallery-count]");
+	const prev = gallery.querySelector("[data-gallery-prev]");
+	const next = gallery.querySelector("[data-gallery-next]");
+	if (!item || !image || !title || !count) return;
+	image.src = item.url;
+	image.alt = item.name || "첨부 사진";
+	image.style.transform = `rotate(${attachmentGalleryState.rotations[item.id] || 0}deg) scale(${attachmentGalleryState.zooms[item.id] || 1})`;
+	title.textContent = item.name || "첨부 사진";
+	count.textContent = `${attachmentGalleryState.index + 1} / ${attachmentGalleryState.items.length}`;
+	const single = attachmentGalleryState.items.length <= 1;
+	if (prev) prev.disabled = single;
+	if (next) next.disabled = single;
+}
+
+function moveAttachmentGallery(direction) {
+	const total = attachmentGalleryState.items.length;
+	if (!total) return;
+	attachmentGalleryState.index = (attachmentGalleryState.index + direction + total) % total;
+	updateAttachmentGallery();
+}
+
+function rotateAttachmentGallery(degrees) {
+	const item = attachmentGalleryState.items[attachmentGalleryState.index];
+	if (!item) return;
+	const current = attachmentGalleryState.rotations[item.id] || 0;
+	attachmentGalleryState.rotations[item.id] = (current + degrees + 360) % 360;
+	updateAttachmentGallery();
+}
+
+function zoomAttachmentGallery(delta) {
+	const item = attachmentGalleryState.items[attachmentGalleryState.index];
+	if (!item) return;
+	const current = attachmentGalleryState.zooms[item.id] || 1;
+	setAttachmentGalleryZoom(item, current + delta);
+}
+
+function setAttachmentGalleryZoom(item, zoom) {
+	attachmentGalleryState.zooms[item.id] = Math.max(0.5, Math.min(3, Math.round(zoom * 100) / 100));
+	updateAttachmentGallery();
+}
+
+function resetAttachmentGalleryZoom() {
+	const item = attachmentGalleryState.items[attachmentGalleryState.index];
+	if (!item) return;
+	attachmentGalleryState.zooms[item.id] = 1;
+	updateAttachmentGallery();
+}
+
+function getPointerDistance(first, second) {
+	return Math.hypot(first.x - second.x, first.y - second.y);
+}
+
+function handleAttachmentGalleryPointerDown(event) {
+	if (!event.target.closest(".attachment-gallery-image")) return;
+	event.preventDefault();
+	event.currentTarget.setPointerCapture?.(event.pointerId);
+	attachmentGalleryState.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+	if (attachmentGalleryState.pointers.size === 1) {
+		attachmentGalleryState.dragStart = { x: event.clientX, y: event.clientY };
+	}
+	if (attachmentGalleryState.pointers.size === 2) {
+		const [first, second] = [...attachmentGalleryState.pointers.values()];
+		const item = attachmentGalleryState.items[attachmentGalleryState.index];
+		attachmentGalleryState.pinchStart = {
+			distance: getPointerDistance(first, second),
+			zoom: item ? attachmentGalleryState.zooms[item.id] || 1 : 1,
+		};
+	}
+}
+
+function handleAttachmentGalleryPointerMove(event) {
+	if (!attachmentGalleryState.pointers.has(event.pointerId)) return;
+	event.preventDefault();
+	attachmentGalleryState.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+	if (attachmentGalleryState.pointers.size !== 2 || !attachmentGalleryState.pinchStart) return;
+	const [first, second] = [...attachmentGalleryState.pointers.values()];
+	const item = attachmentGalleryState.items[attachmentGalleryState.index];
+	if (!item) return;
+	const nextZoom = attachmentGalleryState.pinchStart.zoom * (getPointerDistance(first, second) / attachmentGalleryState.pinchStart.distance);
+	setAttachmentGalleryZoom(item, nextZoom);
+}
+
+function handleAttachmentGalleryPointerUp(event) {
+	const wasPinching = attachmentGalleryState.pointers.size > 1;
+	attachmentGalleryState.pointers.delete(event.pointerId);
+	if (!wasPinching && attachmentGalleryState.dragStart) {
+		const dx = event.clientX - attachmentGalleryState.dragStart.x;
+		const dy = event.clientY - attachmentGalleryState.dragStart.y;
+		const item = attachmentGalleryState.items[attachmentGalleryState.index];
+		const zoom = item ? attachmentGalleryState.zooms[item.id] || 1 : 1;
+		if (Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy) * 1.4 && zoom <= 1.05) {
+			moveAttachmentGallery(dx < 0 ? 1 : -1);
+		}
+	}
+	if (attachmentGalleryState.pointers.size < 2) attachmentGalleryState.pinchStart = null;
+	if (attachmentGalleryState.pointers.size === 0) attachmentGalleryState.dragStart = null;
+}
+
+function closeAttachmentGallery() {
+	const gallery = getAttachmentGallery();
+	gallery.hidden = true;
+	document.body.classList.remove("is-attachment-gallery-open");
+	if (attachmentGalleryState.keyHandler) {
+		document.removeEventListener("keydown", attachmentGalleryState.keyHandler);
+		attachmentGalleryState.keyHandler = null;
+	}
+}
+
+function openAttachmentGallery(items, index = 0) {
+	const availableItems = items.filter((item) => item.url);
+	if (!availableItems.length) return;
+	attachmentGalleryState.items = availableItems;
+	attachmentGalleryState.index = Math.max(0, Math.min(index, availableItems.length - 1));
+	attachmentGalleryState.rotations = {};
+	attachmentGalleryState.zooms = {};
+	attachmentGalleryState.pointers.clear();
+	attachmentGalleryState.dragStart = null;
+	attachmentGalleryState.pinchStart = null;
+	const gallery = getAttachmentGallery();
+	gallery.hidden = false;
+	document.body.classList.add("is-attachment-gallery-open");
+	updateAttachmentGallery();
+	if (attachmentGalleryState.keyHandler) document.removeEventListener("keydown", attachmentGalleryState.keyHandler);
+	attachmentGalleryState.keyHandler = (event) => {
+		if (event.key === "Escape") closeAttachmentGallery();
+		if (event.key === "ArrowLeft") moveAttachmentGallery(-1);
+		if (event.key === "ArrowRight") moveAttachmentGallery(1);
+		if (event.key.toLowerCase() === "q") rotateAttachmentGallery(-90);
+		if (event.key.toLowerCase() === "e") rotateAttachmentGallery(90);
+		if (event.key === "+" || event.key === "=") zoomAttachmentGallery(0.25);
+		if (event.key === "-") zoomAttachmentGallery(-0.25);
+		if (event.key === "0") resetAttachmentGalleryZoom();
+	};
+	document.addEventListener("keydown", attachmentGalleryState.keyHandler);
 }
 
 function consumeAccessLogSkip() {
@@ -294,10 +502,6 @@ function setupNativeBackButton() {
 	if (!isNativeApp() || !appPlugin?.addListener) return;
 
 	appPlugin.addListener("backButton", () => {
-		if (window.StudyFlowAppLock?.isLocked?.()) {
-			appPlugin.exitApp();
-			return;
-		}
 		if (!els.studySessionScreen.hidden) {
 			closeStudySession();
 			return;
@@ -560,6 +764,12 @@ function normalizeStudentState(value) {
 
 	return {
 		...value,
+		student: {
+			...(value?.student || {}),
+			teacherName: value?.student?.teacherName || "",
+			teacherProfileImageUrl: value?.student?.teacherProfileImageUrl || "",
+			teacherComment: value?.student?.teacherComment || "",
+		},
 		subjects,
 		entries:
 			value?.entries && typeof value.entries === "object"
@@ -638,6 +848,7 @@ async function loadStudentState() {
 }
 
 function render() {
+	clearAttachmentPreviewUrls();
 	const today = new Date();
 	const todayText = formatDate(today);
 	const todayPlans = getPlansForDates([today]);
@@ -653,9 +864,33 @@ function render() {
 	els.rewardHistoryCount.textContent = String(rewardHistoryCount);
 	els.weekRange.textContent = `${formatDate(weekStart)} ~ ${formatDate(addDays(weekStart, 6))}`;
 	els.todayPlanList.innerHTML = renderPlanList(todayPlans, "오늘 학습 계획이 없습니다.", true);
+	renderTeacherMessage();
 	els.weekPlanList.innerHTML = renderWeekTable(visibleWeekPlans);
 	els.rewardHistory.innerHTML = renderRewardHistory();
-	window.StudyFlowAppLock?.renderSettings(els.appLockSettings);
+	refreshVisibleAttachmentCounts();
+}
+
+function renderTeacherMessage() {
+	if (!els.teacherMessage) return;
+	const comment = String(state.student.teacherComment || "").trim();
+	if (!comment) {
+		els.teacherMessage.hidden = true;
+		els.teacherMessage.innerHTML = "";
+		return;
+	}
+	const teacherName = state.student.teacherName ? `${state.student.teacherName} 선생님` : "선생님";
+	const imageUrl = String(state.student.teacherProfileImageUrl || "").trim();
+	const avatar = imageUrl
+		? `<img src="${escapeHtml(imageUrl)}" alt="">`
+		: `<span>${escapeHtml((state.student.teacherName || "선").slice(0, 1))}</span>`;
+	els.teacherMessage.hidden = false;
+	els.teacherMessage.innerHTML = `
+    <div class="student-teacher-avatar">${avatar}</div>
+    <div>
+      <strong>${escapeHtml(teacherName)}</strong>
+      <p class="student-teacher-bubble">${escapeHtml(comment)}</p>
+    </div>
+  `;
 }
 
 function renderWeekTable(visiblePlans) {
@@ -787,10 +1022,13 @@ function renderPlanList(plans, emptyText, showTeacherMemo = false) {
 				? `<div class="student-plan-record">
             <span>완료 기록</span>
             ${recordItems.map((item) => `<p>${escapeHtml(item)}</p>`).join("")}
+            <div class="student-attachment-block" data-attachment-list data-subject-id="${escapeHtml(plan.subject.id)}" data-date="${escapeHtml(plan.date)}">
+              <p class="student-attachment-count">등록 사진 확인 중</p>
+            </div>
           </div>`
 				: "";
 			const actionArea = entry.completed
-				? ""
+				? `<button class="ghost student-attachment-upload" type="button" data-upload-study-attachment data-subject-id="${escapeHtml(plan.subject.id)}" data-date="${escapeHtml(plan.date)}">사진 등록</button>`
 				: `<button type="button" data-start-study data-subject-id="${escapeHtml(plan.subject.id)}" data-date="${escapeHtml(plan.date)}" data-amount="${escapeHtml(amountText)}" data-minimum-study-minutes="${minimumStudyMinutes}">학습 시작</button>`;
 			return `
       <article class="student-plan-card ${entry.completed ? "is-complete" : ""}" data-subject-id="${escapeHtml(plan.subject.id)}" data-date="${escapeHtml(plan.date)}" data-amount="${escapeHtml(amountText)}" data-minimum-study-minutes="${minimumStudyMinutes}">
@@ -802,7 +1040,6 @@ function renderPlanList(plans, emptyText, showTeacherMemo = false) {
           </div>
           <div class="student-plan-badges">
             ${actionArea}
-            ${entry.rewardAwarded && !entry.rewardRedeemed ? `<span class="reward-badge">+${escapeHtml(formatReward(entry.rewardAmount, entry.rewardLabel))}</span>` : ""}
           </div>
         </div>
         <div class="student-plan-info">
@@ -865,6 +1102,197 @@ async function saveStudyEntry(payload) {
 	} catch (error) {
 		setStatus(error.message || "저장하지 못했습니다.", true);
 		throw error;
+	}
+}
+
+async function uploadStudyAttachments(study, files) {
+	if (!files.length) return [];
+	const formData = new FormData();
+	formData.append("subjectId", study.subjectId);
+	formData.append("date", study.date);
+	files.forEach((file) => formData.append("attachments", file));
+
+	const response = await fetch("/api/attachments/student-entry", {
+		method: "POST",
+		headers: {
+			Authorization: `Bearer ${authToken}`,
+		},
+		body: formData,
+	});
+	const data = await response.json().catch(() => ({}));
+	if (!response.ok) throw new Error(data.message || "첨부 사진을 업로드하지 못했습니다.");
+	return data.attachments || [];
+}
+
+async function fetchStudyAttachmentInfo(study) {
+	const params = new URLSearchParams({
+		subjectId: study.subjectId,
+		date: study.date,
+	});
+	const response = await fetch(`/api/attachments/entry?${params}`, {
+		headers: {
+			Authorization: `Bearer ${authToken}`,
+		},
+	});
+	const data = await response.json().catch(() => ({}));
+	if (!response.ok) throw new Error(data.message || "첨부 사진 정보를 불러오지 못했습니다.");
+	return {
+		attachments: data.attachments || [],
+		analysis: data.analysis || {},
+	};
+}
+
+function getAttachmentListElements(study) {
+	return Array.from(document.querySelectorAll("[data-attachment-list]")).filter(
+		(element) => element.dataset.subjectId === study.subjectId && element.dataset.date === study.date,
+	);
+}
+
+function renderAttachmentList(study, attachments) {
+	const elements = getAttachmentListElements(study);
+	elements.forEach((element) => {
+		if (!attachments.length) {
+			element.innerHTML = `<p class="student-attachment-count">등록 사진 없음</p>`;
+			return;
+		}
+		element.innerHTML = `
+      <p class="student-attachment-count">등록 사진 ${attachments.length}개</p>
+      <div class="student-attachment-list">
+        ${attachments
+			.map((attachment) => `
+          <figure class="student-attachment-item" data-student-attachment-id="${escapeHtml(attachment.id)}">
+            <button class="student-attachment-thumb" type="button" data-open-study-attachment="${escapeHtml(attachment.id)}">불러오는 중</button>
+            <figcaption>${escapeHtml(attachment.originalName || "첨부 사진")}</figcaption>
+            ${
+				attachment.canDelete
+					? `<button class="student-attachment-delete" type="button" data-delete-study-attachment="${escapeHtml(attachment.id)}" data-subject-id="${escapeHtml(study.subjectId)}" data-date="${escapeHtml(study.date)}" aria-label="사진 삭제">×</button>`
+					: `<span class="student-attachment-locked">확인됨</span>`
+			}
+          </figure>
+        `)
+			.join("")}
+      </div>
+    `;
+	});
+}
+
+function isAttachmentUploadLocked(analysis) {
+	return ["analyzing", "completed"].includes(String(analysis?.aiStatus || ""));
+}
+
+function updateAttachmentUploadButton(study, analysis) {
+	const locked = isAttachmentUploadLocked(analysis);
+	document.querySelectorAll("[data-upload-study-attachment]").forEach((button) => {
+		if (button.dataset.subjectId !== study.subjectId || button.dataset.date !== study.date) return;
+		button.disabled = locked;
+		button.textContent = locked ? "등록 마감" : "사진 등록";
+		button.title = locked ? "사진 확인이 시작되어 더 등록할 수 없습니다." : "";
+	});
+}
+
+async function hydrateAttachmentThumbnails(attachments) {
+	await Promise.all(attachments.map(async (attachment) => {
+		try {
+			if (attachmentPreviewUrls.has(attachment.id)) URL.revokeObjectURL(attachmentPreviewUrls.get(attachment.id));
+			const response = await fetch(attachment.fileUrl, {
+				headers: {
+					Authorization: `Bearer ${authToken}`,
+				},
+			});
+			if (!response.ok) throw new Error("첨부 사진을 불러오지 못했습니다.");
+			const url = URL.createObjectURL(await response.blob());
+			attachmentPreviewUrls.set(attachment.id, url);
+			document.querySelectorAll(`[data-student-attachment-id="${CSS.escape(attachment.id)}"]`).forEach((item) => {
+				const thumb = item.querySelector(".student-attachment-thumb");
+				if (thumb) {
+					thumb.innerHTML = `<img src="${url}" alt="${escapeHtml(attachment.originalName || "첨부 사진")}">`;
+					thumb.dataset.attachmentUrl = url;
+					thumb.dataset.attachmentName = attachment.originalName || "첨부 사진";
+				}
+			});
+		} catch {
+			document.querySelectorAll(`[data-student-attachment-id="${CSS.escape(attachment.id)}"] .student-attachment-thumb`).forEach((thumb) => {
+				thumb.textContent = "불러오기 실패";
+			});
+		}
+	}));
+}
+
+async function refreshAttachmentList(study) {
+	const { attachments, analysis } = await fetchStudyAttachmentInfo(study);
+	renderAttachmentList(study, attachments);
+	updateAttachmentUploadButton(study, analysis);
+	await hydrateAttachmentThumbnails(attachments);
+	return attachments.length;
+}
+
+function refreshVisibleAttachmentCounts() {
+	const summaries = Array.from(document.querySelectorAll("[data-attachment-list]"));
+	const studies = new Map();
+	summaries.forEach((element) => {
+		const subjectId = element.dataset.subjectId || "";
+		const date = element.dataset.date || "";
+		if (!subjectId || !date) return;
+		studies.set(`${subjectId}__${date}`, { subjectId, date });
+	});
+	studies.forEach((study) => {
+		refreshAttachmentList(study).catch(() => {
+			getAttachmentListElements(study).forEach((element) => {
+				element.innerHTML = `<p class="student-attachment-count">등록 사진 확인 실패</p>`;
+			});
+		});
+	});
+}
+
+async function deleteStudyAttachment(attachmentId, study) {
+	const response = await fetch(`/api/attachments/${encodeURIComponent(attachmentId)}`, {
+		method: "DELETE",
+		headers: {
+			Authorization: `Bearer ${authToken}`,
+		},
+	});
+	const data = await response.json().catch(() => ({}));
+	if (!response.ok) throw new Error(data.message || "첨부 사진을 삭제하지 못했습니다.");
+	if (attachmentPreviewUrls.has(attachmentId)) {
+		URL.revokeObjectURL(attachmentPreviewUrls.get(attachmentId));
+		attachmentPreviewUrls.delete(attachmentId);
+	}
+	return refreshAttachmentList(study);
+}
+
+async function uploadCompletedStudyAttachments(files) {
+	if (!pendingAttachmentStudy) return;
+	const targetStudy = pendingAttachmentStudy;
+	const images = files.filter((file) => ["image/jpeg", "image/png", "image/webp"].includes(file.type));
+	if (images.length !== files.length) {
+		setStatus("jpg, png, webp 이미지만 첨부할 수 있습니다.", true);
+		showStudentToast("jpg, png, webp 이미지만 첨부할 수 있습니다.", true);
+	}
+	if (!images.length) {
+		pendingAttachmentStudy = null;
+		if (els.studentAttachmentPicker) els.studentAttachmentPicker.value = "";
+		return;
+	}
+	const selectedFiles = images.slice(0, 5);
+	if (images.length > 5) {
+		setStatus("첨부 사진은 최대 5장까지 업로드할 수 있습니다.", true);
+		showStudentToast("첨부 사진은 최대 5장까지 업로드할 수 있습니다.", true);
+	}
+
+	try {
+		setStatus("첨부 사진 업로드 중");
+		showStudentToast("첨부 사진 업로드 중");
+		const uploaded = await uploadStudyAttachments(targetStudy, selectedFiles);
+		const count = await refreshAttachmentList(targetStudy).catch(() => uploaded.length);
+		const message = `사진 등록 완료. 현재 등록 사진 ${count}개`;
+		setStatus(message);
+		showStudentToast(message);
+	} catch (error) {
+		setStatus(error.message || "첨부 사진을 업로드하지 못했습니다.", true);
+		showStudentToast(error.message || "첨부 사진을 업로드하지 못했습니다.", true);
+	} finally {
+		pendingAttachmentStudy = null;
+		if (els.studentAttachmentPicker) els.studentAttachmentPicker.value = "";
 	}
 }
 
@@ -1011,17 +1439,6 @@ if (els.pushToggle) {
 	els.pushToggle.addEventListener("click", togglePushSubscription);
 }
 
-if (els.appLockSettings) {
-	els.appLockSettings.addEventListener("click", (event) => {
-		window.StudyFlowAppLock?.handleSettingsClick(event, () => window.StudyFlowAppLock?.renderSettings(els.appLockSettings));
-	});
-	els.appLockSettings.addEventListener("change", (event) => {
-		if (window.StudyFlowAppLock?.handleSettingsChange(event)) {
-			window.StudyFlowAppLock?.renderSettings(els.appLockSettings);
-		}
-	});
-}
-
 els.prevWeek.addEventListener("click", () => {
 	weekStart = addDays(weekStart, -7);
 	render();
@@ -1054,9 +1471,79 @@ document.addEventListener("click", (event) => {
 	if (card) startStudy(card);
 });
 
+document.addEventListener("click", (event) => {
+	const button = event.target.closest("[data-upload-study-attachment]");
+	if (!button || !els.studentAttachmentPicker) return;
+	if (button.disabled) return;
+	const study = {
+		subjectId: button.dataset.subjectId,
+		date: button.dataset.date,
+	};
+	button.disabled = true;
+	fetchStudyAttachmentInfo(study)
+		.then(({ analysis }) => {
+			updateAttachmentUploadButton(study, analysis);
+			if (isAttachmentUploadLocked(analysis)) {
+				showStudentToast("사진 확인이 시작되어 더 등록할 수 없습니다.", true);
+				return;
+			}
+			pendingAttachmentStudy = study;
+			els.studentAttachmentPicker.click();
+			button.disabled = false;
+		})
+		.catch(() => {
+			pendingAttachmentStudy = study;
+			els.studentAttachmentPicker.click();
+			button.disabled = false;
+		});
+});
+
+document.addEventListener("click", (event) => {
+	const button = event.target.closest("[data-open-study-attachment]");
+	if (!button) return;
+	const list = button.closest(".student-attachment-list");
+	const items = Array.from(list?.querySelectorAll("[data-open-study-attachment]") || [])
+		.map((item) => ({
+			id: item.dataset.openStudyAttachment || "",
+			name: item.dataset.attachmentName || "첨부 사진",
+			url: item.dataset.attachmentUrl || "",
+		}))
+		.filter((item) => item.url);
+	const index = Math.max(0, items.findIndex((item) => item.id === button.dataset.openStudyAttachment));
+	openAttachmentGallery(items, index);
+});
+
+document.addEventListener("click", (event) => {
+	const button = event.target.closest("[data-delete-study-attachment]");
+	if (!button) return;
+	if (!window.confirm("등록한 사진을 삭제할까요?")) return;
+	const study = {
+		subjectId: button.dataset.subjectId,
+		date: button.dataset.date,
+	};
+	button.disabled = true;
+	deleteStudyAttachment(button.dataset.deleteStudyAttachment, study)
+		.then((count) => {
+			const message = `사진 삭제 완료. 현재 등록 사진 ${count}개`;
+			setStatus(message);
+			showStudentToast(message);
+		})
+		.catch((error) => {
+			button.disabled = false;
+			setStatus(error.message || "첨부 사진을 삭제하지 못했습니다.", true);
+			showStudentToast(error.message || "첨부 사진을 삭제하지 못했습니다.", true);
+		});
+});
+
 els.studySessionComplete.addEventListener("click", () => {
 	completeStudy().catch(() => {});
 });
+
+if (els.studentAttachmentPicker) {
+	els.studentAttachmentPicker.addEventListener("change", () => {
+		uploadCompletedStudyAttachments(Array.from(els.studentAttachmentPicker.files || [])).catch(() => {});
+	});
+}
 
 els.studySessionCancel.addEventListener("click", () => {
 	closeStudySession();
@@ -1065,13 +1552,6 @@ els.studySessionCancel.addEventListener("click", () => {
 showPage(getSavedPage());
 setupNativeBackButton();
 setupNativeAccessLogEvents();
-window.StudyFlowAppLock?.init({
-	role: "student",
-	accountId: authUser.id || authUser.loginId || "anonymous",
-	accountName: authUser.name || authUser.loginId || "StudyFlow",
-	isNativeApp,
-	onLogout: () => els.logout.click(),
-});
 recordStartupAccessLog();
 loadStudentState();
 refreshPushState();

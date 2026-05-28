@@ -63,7 +63,7 @@ let activeSubjectSettingEdit = null;
 let activeSubjectDragId = "";
 let activeRewardResetChild = "";
 let activePage = "weekly";
-let weekChildFilter = "all";
+let weekChildFilter = "active";
 let weekSubjectFilter = "all";
 let weekSearchQuery = "";
 let syncStateTimer = null;
@@ -73,6 +73,10 @@ let pushState = { supported: false, subscribed: false, permission: "default" };
 let accessLogs = [];
 let accessLogsLoading = false;
 let lastAccessLogAt = 0;
+let entryAttachmentObjectUrls = [];
+let attachmentGalleryState = { items: [], index: 0, rotations: {}, zooms: {}, pointers: new Map(), dragStart: null, pinchStart: null, keyHandler: null };
+let availablePlans = [];
+let teacherToastTimer = null;
 
 function getAuthUser() {
 	try {
@@ -156,10 +160,10 @@ const els = {
 	statsContent: document.querySelector("#statsContent"),
 	rewardHistoryContent: document.querySelector("#rewardHistoryContent"),
 	mypageContent: document.querySelector("#mypageContent"),
+	teacherToast: document.querySelector("#teacherToast"),
 	subjectsContent: document.querySelector("#subjectsContent"),
 	subjectsSection: document.querySelector("#subjectsPage .mypage-section"),
 	settingsSection: document.querySelector("#settingsPage .mypage-section"),
-	teacherAppLockSettings: document.querySelector("#teacherAppLockSettings"),
 	accessLogsSection: document.querySelector("#accessLogsPage .mypage-section"),
 	accessLogsContent: document.querySelector("#accessLogsContent"),
 	weekStartModeInputs: document.querySelectorAll("[data-week-start-mode]"),
@@ -176,6 +180,12 @@ const els = {
 	entryStudyStartedAt: document.querySelector("#entryStudyStartedAt"),
 	entryStudyDuration: document.querySelector("#entryStudyDuration"),
 	entryStudentFeedback: document.querySelector("#entryStudentFeedback"),
+	entryAttachmentsBlock: document.querySelector("#entryAttachmentsBlock"),
+	entryAttachmentList: document.querySelector("#entryAttachmentList"),
+	entryAiPanel: document.querySelector("#entryAiPanel"),
+	entryAnalyzeButton: document.querySelector("#entryAnalyzeButton"),
+	entryAiStatus: document.querySelector("#entryAiStatus"),
+	entryAiResult: document.querySelector("#entryAiResult"),
 	closeEntryDialog: document.querySelector("#closeEntryDialog"),
 	cancelEntryDialog: document.querySelector("#cancelEntryDialog"),
 	deleteEntry: document.querySelector("#deleteEntry"),
@@ -235,6 +245,24 @@ const els = {
 	rewardResetMeta: document.querySelector("#rewardResetMeta"),
 	rewardResetSummary: document.querySelector("#rewardResetSummary"),
 	rewardResetList: document.querySelector("#rewardResetList"),
+	planDialog: document.querySelector("#planDialog"),
+	planForm: document.querySelector("#planForm"),
+	planOptions: document.querySelector("#planOptions"),
+	planChangeMessage: document.querySelector("#planChangeMessage"),
+	closePlanDialog: document.querySelector("#closePlanDialog"),
+	cancelPlanDialog: document.querySelector("#cancelPlanDialog"),
+	savePlanChange: document.querySelector("#savePlanChange"),
+	paymentTermDialog: document.querySelector("#paymentTermDialog"),
+	paymentTermForm: document.querySelector("#paymentTermForm"),
+	paymentTermOptions: document.querySelector("#paymentTermOptions"),
+	paymentTermMessage: document.querySelector("#paymentTermMessage"),
+	closePaymentTermDialog: document.querySelector("#closePaymentTermDialog"),
+	cancelPaymentTermDialog: document.querySelector("#cancelPaymentTermDialog"),
+	confirmPaymentTerm: document.querySelector("#confirmPaymentTerm"),
+	innopayMethodDialog: document.querySelector("#innopayMethodDialog"),
+	closeInnopayMethodDialog: document.querySelector("#closeInnopayMethodDialog"),
+	profilePhotoDialog: document.querySelector("#profilePhotoDialog"),
+	closeProfilePhotoDialog: document.querySelector("#closeProfilePhotoDialog"),
 };
 
 function loadState() {
@@ -268,23 +296,27 @@ function createDefaultState() {
 function normalizeState(value) {
 	const profile = normalizeProfile(value.profile);
 	const userSettings = normalizeUserSettings(value.userSettings);
-	const entries = value.entries && typeof value.entries === "object" ? value.entries : {};
 	const childAccounts = normalizeChildAccounts(value);
-	const childNames = childAccounts.map((account) => account.name);
-	const subjectsByChild = Object.fromEntries(childNames.map((child) => [child, []]));
+	const subjectsByChild = Object.fromEntries(childAccounts.map((account) => [getChildKey(account), []]));
+	const childNameCounts = getChildNameCounts(childAccounts);
 
 	if (value.subjectsByChild && typeof value.subjectsByChild === "object") {
-		childNames.forEach((child) => {
-			subjectsByChild[child] = Array.isArray(value.subjectsByChild[child]) ? value.subjectsByChild[child].map(normalizeSubject) : [];
+		childAccounts.forEach((account) => {
+			const childKey = getChildKey(account);
+			const legacySubjects = childNameCounts.get(account.name) === 1 ? value.subjectsByChild[account.name] : null;
+			const subjects = value.subjectsByChild[childKey] || legacySubjects || [];
+			subjectsByChild[childKey] = Array.isArray(subjects) ? subjects.map((subject) => ({ ...normalizeSubject(subject), childId: childKey })) : [];
 		});
 	} else if (Array.isArray(value.subjects)) {
-		childNames.forEach((child) => {
-			subjectsByChild[child] = value.subjects.map(normalizeSubject);
+		childAccounts.forEach((account) => {
+			const childKey = getChildKey(account);
+			subjectsByChild[childKey] = value.subjects.map((subject) => ({ ...normalizeSubject(subject), childId: childKey }));
 		});
 	}
 
 	const subjectSettings = normalizeSubjectSettings(value.subjectSettings, subjectsByChild);
 	assignSubjectSettingsToBooks(subjectsByChild, subjectSettings);
+	const entries = normalizeEntries(value.entries, childAccounts, subjectsByChild);
 
 	return { profile, childAccounts, subjectsByChild, subjectSettings, userSettings, entries };
 }
@@ -301,38 +333,127 @@ function normalizeUserSettings(settings = {}) {
 }
 
 function normalizeProfile(profile) {
+	const monthlyPrice = Number(profile?.plan?.monthlyPrice ?? profile?.monthlyPrice ?? 0);
+	const gradientFrom = normalizePlanColor(profile?.plan?.gradientFrom || profile?.gradientFrom, monthlyPrice > 0 ? "#426f96" : "#64748b");
+	const gradientTo = normalizePlanColor(profile?.plan?.gradientTo || profile?.gradientTo, monthlyPrice > 0 ? "#2ba889" : "#94a3b8");
 	return {
 		name: profile?.name || "학습 관리자",
 		email: profile?.email || "manager@example.com",
 		password: profile?.password || "",
 		phone: profile?.phone || "",
 		marketingConsent: Boolean(profile?.marketingConsent),
+		plan: {
+			code: profile?.plan?.code || profile?.planCode || "basic",
+			name: profile?.plan?.name || profile?.planName || "",
+			monthlyPrice,
+			studentLimit: Number(profile?.plan?.studentLimit ?? profile?.studentLimit ?? 0),
+			gradientFrom,
+			gradientTo,
+		},
+		servicePeriod: {
+			startedAt: monthlyPrice > 0 ? profile?.servicePeriod?.startedAt || profile?.serviceStartedAt || "" : "",
+			endsAt: monthlyPrice > 0 ? profile?.servicePeriod?.endsAt || profile?.serviceEndsAt || "" : "",
+		},
+		profileImageUrl: profile?.profileImageUrl || "",
+		teacherComment: String(profile?.teacherComment || "").slice(0, 200),
 	};
 }
 
 function normalizeChildAccounts(value) {
 	const savedAccounts = Array.isArray(value.childAccounts) ? value.childAccounts : [];
-	const names = [...savedAccounts.map((account) => account?.name), ...Object.keys(value.subjectsByChild || {})].map((name) => String(name || "").trim()).filter(Boolean);
-	const uniqueNames = [...new Set(names)];
+	const accounts = savedAccounts
+		.map((account) => ({
+			id: account?.id || crypto.randomUUID(),
+			name: String(account?.name || "").trim(),
+				birthMonth: account?.birthMonth || "",
+				phone: normalizeMobilePhone(account?.phone),
+				parentPhone: normalizeMobilePhone(account?.parentPhone),
+				status: normalizeChildStatus(account?.status),
+				loginId: account?.loginId || "",
+			password: account?.password || "",
+		}))
+		.filter((account) => account.name);
 
-	return sortChildAccountsByBirth(
-		uniqueNames.map((name) => {
-			const saved = savedAccounts.find((account) => account?.name === name) || {};
-			return {
-				id: saved.id || crypto.randomUUID(),
-				name,
-				birthMonth: saved.birthMonth || "",
-				phone: normalizeMobilePhone(saved.phone),
-				parentPhone: normalizeMobilePhone(saved.parentPhone),
-				loginId: saved.loginId || "",
-				password: saved.password || "",
-			};
-		}),
-	);
+	if (!accounts.length && value.subjectsByChild && typeof value.subjectsByChild === "object") {
+		Object.keys(value.subjectsByChild).forEach((name) => {
+			const childName = String(name || "").trim();
+			if (childName) accounts.push({ id: crypto.randomUUID(), name: childName, birthMonth: "", phone: "", parentPhone: "", loginId: "", password: "" });
+		});
+	}
+
+	return sortChildAccountsByBirth(accounts);
 }
 
 function getChildNamesFromState() {
-	return state.childAccounts.map((account) => account.name);
+	return state.childAccounts.map((account) => getChildKey(account));
+}
+
+function normalizeChildStatus(value) {
+	return String(value || "") === "hidden" ? "hidden" : "active";
+}
+
+function isChildHidden(child) {
+	const account = typeof child === "object" ? child : getChildAccount(child);
+	return normalizeChildStatus(account?.status) === "hidden";
+}
+
+function getVisibleChildKeysByStatus(status = weekChildFilter) {
+	if (status === "all") return children;
+	if (status === "hidden") return state.childAccounts.filter((account) => isChildHidden(account)).map(getChildKey);
+	return state.childAccounts.filter((account) => !isChildHidden(account)).map(getChildKey);
+}
+
+function getActiveChildAccounts() {
+	return state.childAccounts.filter((account) => !isChildHidden(account));
+}
+
+function getChildKey(child) {
+	if (!child) return "";
+	if (typeof child === "object") return String(child.id || child.name || "").trim();
+	return String(child || "").trim();
+}
+
+function getChildNameCounts(accounts = state.childAccounts) {
+	const counts = new Map();
+	accounts.forEach((account) => counts.set(account.name, (counts.get(account.name) || 0) + 1));
+	return counts;
+}
+
+function getChildAccount(childKeyOrName) {
+	const key = getChildKey(childKeyOrName);
+	return state.childAccounts.find((account) => getChildKey(account) === key) || state.childAccounts.find((account) => account.name === key) || null;
+}
+
+function getChildName(childKeyOrName) {
+	return getChildAccount(childKeyOrName)?.name || String(childKeyOrName || "");
+}
+
+function getChildOptionLabel(account) {
+	const duplicates = getChildNameCounts().get(account.name) > 1;
+	const suffix = [
+		duplicates ? account.birthMonth || String(account.id).slice(0, 4) : "",
+		isChildHidden(account) ? "숨김" : "",
+	].filter(Boolean).join(" · ");
+	return suffix ? `${account.name} (${suffix})` : account.name;
+}
+
+function normalizeEntries(entriesValue, childAccounts, subjectsByChild) {
+	const entries = {};
+	Object.values(entriesValue && typeof entriesValue === "object" ? entriesValue : {}).forEach((entry) => {
+		const account = childAccounts.find((child) => getChildKey(child) === String(entry.childId || "")) || childAccounts.find((child) => child.name === entry.child);
+		const childId = account ? getChildKey(account) : String(entry.childId || entry.child || "").trim();
+		if (!childId || !entry.subjectId || !entry.date) return;
+		const subject = subjectsByChild[childId]?.find((item) => item.id === entry.subjectId);
+		if (!subject && account && getChildNameCounts(childAccounts).get(account.name) > 1 && !entry.childId) return;
+		const key = entryKey(childId, entry.subjectId, entry.date);
+		entries[key] = {
+			...entry,
+			key,
+			childId,
+			child: account?.name || entry.child || "",
+		};
+	});
+	return entries;
 }
 
 function sortChildAccountsByBirth(accounts) {
@@ -408,6 +529,19 @@ function normalizeMobilePhone(value) {
 	if (/^01\d{8}$/.test(digits)) return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
 	if (/^01\d{9}$/.test(digits)) return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
 	return raw;
+}
+
+function normalizePlanColor(value, fallback) {
+	const text = String(value || "").trim();
+	return /^#[0-9a-fA-F]{6}$/.test(text) ? text : fallback;
+}
+
+function normalizePaymentPhone(value) {
+	return String(value || "").replace(/\D/g, "");
+}
+
+function normalizeInnopayUserId(value) {
+	return String(value || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 20);
 }
 
 function isValidKoreanMobilePhone(value) {
@@ -575,6 +709,118 @@ function flushPendingRemoteState() {
 	}
 }
 
+async function requestTeacherJson(path, options = {}) {
+	const response = await fetch(path, {
+		...options,
+		headers: {
+			Authorization: `Bearer ${authToken}`,
+			"Content-Type": "application/json",
+			...(options.headers || {}),
+		},
+	});
+	if (!isJsonResponse(response)) throw new Error("StudyFlow API 응답이 아닙니다.");
+	if (response.status === 401) {
+		logout();
+		throw new Error("로그인이 필요합니다.");
+	}
+	const data = await response.json().catch(() => ({}));
+	if (!response.ok) throw new Error(data.message || "요청을 처리하지 못했습니다.");
+	return data;
+}
+
+function applyUpdatedProfile(user) {
+	state.profile = normalizeProfile(user);
+	localStorage.setItem(`${AUTH_USER_KEY_PREFIX}teacher`, JSON.stringify({ ...authUser, ...user, role: "teacher" }));
+	localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+	renderProfile();
+	renderMyPage();
+}
+
+async function uploadProfilePhoto(file) {
+	if (!file) return;
+	if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+		alert("jpg, png, webp 형식의 이미지만 등록할 수 있습니다.");
+		return;
+	}
+	if (file.size > 5 * 1024 * 1024) {
+		alert("프로필 사진은 5MB 이하로 등록하세요.");
+		return;
+	}
+
+	const formData = new FormData();
+	formData.append("photo", file);
+	const response = await fetch("/api/auth/profile/photo", {
+		method: "POST",
+		headers: {
+			Authorization: `Bearer ${authToken}`,
+		},
+		body: formData,
+	});
+	if (!isJsonResponse(response)) throw new Error("StudyFlow API 응답이 아닙니다.");
+	if (response.status === 401) {
+		logout();
+		throw new Error("로그인이 필요합니다.");
+	}
+	const data = await response.json().catch(() => ({}));
+	if (!response.ok) throw new Error(data.message || "프로필 사진을 저장하지 못했습니다.");
+	applyUpdatedProfile(data.user);
+	setSyncStatus("프로필 사진 저장 완료");
+}
+
+async function resetProfilePhoto() {
+	const response = await fetch("/api/auth/profile/photo", {
+		method: "DELETE",
+		headers: {
+			Authorization: `Bearer ${authToken}`,
+		},
+	});
+	if (!isJsonResponse(response)) throw new Error("StudyFlow API 응답이 아닙니다.");
+	if (response.status === 401) {
+		logout();
+		throw new Error("로그인이 필요합니다.");
+	}
+	const data = await response.json().catch(() => ({}));
+	if (!response.ok) throw new Error(data.message || "프로필 사진을 초기화하지 못했습니다.");
+	applyUpdatedProfile(data.user);
+	setSyncStatus("프로필 사진 초기화 완료");
+}
+
+async function saveTeacherComment() {
+	const input = els.mypageContent.querySelector("[data-teacher-comment-input]");
+	const button = els.mypageContent.querySelector("[data-teacher-comment-save]");
+	if (!input) return;
+	const teacherComment = String(input.value || "").trim().slice(0, 200);
+	if (button) button.disabled = true;
+	try {
+		const data = await requestTeacherJson("/api/auth/profile/comment", {
+			method: "PUT",
+			body: JSON.stringify({ teacherComment }),
+		});
+		applyUpdatedProfile(data.user);
+		setSyncStatus("선생님 한마디 저장 완료");
+		showTeacherToast("선생님 한마디를 저장했습니다.");
+	} catch (error) {
+		showTeacherToast(error.message || "선생님 한마디를 저장하지 못했습니다.", true);
+	} finally {
+		if (button) button.disabled = false;
+	}
+}
+
+function openProfilePhotoDialog() {
+	if (!els.profilePhotoDialog) return;
+	const resetButton = els.profilePhotoDialog.querySelector("[data-profile-photo-clear]");
+	if (resetButton) {
+		const hasPhoto = Boolean(String(state.profile.profileImageUrl || "").trim());
+		resetButton.disabled = !hasPhoto;
+		resetButton.classList.toggle("is-disabled", !hasPhoto);
+	}
+	els.profilePhotoDialog.showModal();
+}
+
+function closeProfilePhotoDialog() {
+	if (els.profilePhotoDialog?.open) els.profilePhotoDialog.close();
+}
+
 async function syncTeacherEntry(entry) {
 	try {
 		setSyncStatus("학습 기록 저장 중");
@@ -606,8 +852,9 @@ async function syncTeacherEntry(entry) {
 }
 
 async function notifyStudentManualSchedule(entry) {
-	const childAccount = state.childAccounts.find((account) => account.name === entry.child);
-	const subject = getSubjectsForChild(entry.child).find((item) => item.id === entry.subjectId);
+	const childKey = getEntryChildKey(entry);
+	const childAccount = getChildAccount(childKey);
+	const subject = getSubjectsForChild(childKey).find((item) => item.id === entry.subjectId);
 	if (!childAccount?.id || !subject) return;
 
 	try {
@@ -619,7 +866,7 @@ async function notifyStudentManualSchedule(entry) {
 			},
 			body: JSON.stringify({
 				childId: childAccount.id,
-				childName: entry.child,
+				childName: childAccount.name,
 				subjectName: subject.name,
 				bookName: subject.book,
 				date: entry.date,
@@ -772,6 +1019,17 @@ function setSyncStatus(text, isError = false) {
 	if (isError) console.warn(`[StudyFlow Sync] ${text}`);
 }
 
+function showTeacherToast(text, isError = false) {
+	if (!els.teacherToast) return;
+	window.clearTimeout(teacherToastTimer);
+	els.teacherToast.textContent = text;
+	els.teacherToast.classList.toggle("is-error", isError);
+	els.teacherToast.classList.add("is-visible");
+	teacherToastTimer = window.setTimeout(() => {
+		els.teacherToast.classList.remove("is-visible");
+	}, isError ? 4000 : 2400);
+}
+
 function consumeAccessLogSkip() {
 	try {
 		const value = sessionStorage.getItem(ACCESS_LOG_SKIP_KEY);
@@ -893,7 +1151,7 @@ function getEntriesForCurrentWeek() {
 }
 
 function getVisibleChildren() {
-	const filteredChildren = weekChildFilter === "all" ? children : children.filter((child) => child === weekChildFilter);
+	const filteredChildren = getVisibleChildKeysByStatus();
 	if (!weekSearchQuery) return filteredChildren;
 	return filteredChildren.filter((child) => childMatchesWeekSearch(child));
 }
@@ -902,23 +1160,23 @@ function getVisibleSubjectsForChild(child) {
 	const activeSubjects = getActiveSubjectsForChild(child);
 	const subjectFiltered = weekSubjectFilter === "all" ? activeSubjects : activeSubjects.filter((subject) => getSubjectSetting(subject)?.id === weekSubjectFilter);
 	if (!weekSearchQuery) return subjectFiltered;
-	if (child.toLowerCase().includes(weekSearchQuery)) return subjectFiltered;
+	if (getChildName(child).toLowerCase().includes(weekSearchQuery)) return subjectFiltered;
 	return subjectFiltered.filter((subject) => subjectMatchesWeekSearch(subject));
 }
 
 function getVisibleEntriesForChildInWeek(child, dates) {
 	return Object.values(state.entries).filter((entry) => {
-		if (entry.child !== child || !dates.includes(entry.date)) return false;
+		if (getEntryChildKey(entry) !== child || !dates.includes(entry.date)) return false;
 		const subject = getSubjectForEntry(entry);
 		if (weekSubjectFilter !== "all" && getSubjectSetting(subject)?.id !== weekSubjectFilter) return false;
-		if (!weekSearchQuery || child.toLowerCase().includes(weekSearchQuery)) return true;
+		if (!weekSearchQuery || getChildName(child).toLowerCase().includes(weekSearchQuery)) return true;
 		return subject ? subjectMatchesWeekSearch(subject) : false;
 	});
 }
 
 function childMatchesWeekSearch(child) {
 	const query = weekSearchQuery;
-	if (child.toLowerCase().includes(query)) return true;
+	if (getChildName(child).toLowerCase().includes(query)) return true;
 	return getVisibleSubjectsForChild(child).length > 0;
 }
 
@@ -973,6 +1231,15 @@ function getStartupPage() {
 	return userSettings.startupScreenMode === "last" ? getSavedPage("weekly") : "weekly";
 }
 
+function getRequestedPage() {
+	try {
+		const requestedPage = new URLSearchParams(window.location.search).get("page");
+		return Array.from(els.pageViews).some((view) => view.dataset.page === requestedPage) ? requestedPage : "";
+	} catch {
+		return "";
+	}
+}
+
 function consumeLoginStartupRequest() {
 	try {
 		const requested = sessionStorage.getItem(TEACHER_LOGIN_STARTUP_KEY) === "1";
@@ -984,7 +1251,7 @@ function consumeLoginStartupRequest() {
 }
 
 function getPageAfterHydration() {
-	return consumeLoginStartupRequest() ? getStartupPage() : getSavedPage("weekly");
+	return getRequestedPage() || (consumeLoginStartupRequest() ? getStartupPage() : getSavedPage("weekly"));
 }
 
 function getStorablePage(page) {
@@ -1027,10 +1294,6 @@ function setupNativeBackButton() {
 	if (!isNativeApp() || !appPlugin?.addListener) return;
 
 	appPlugin.addListener("backButton", () => {
-		if (window.StudyFlowAppLock?.isLocked?.()) {
-			appPlugin.exitApp();
-			return;
-		}
 		if (closeOpenDialogForBack()) return;
 		if (activePage !== "weekly") {
 			showPage("weekly");
@@ -1047,8 +1310,12 @@ function renderWeekRange() {
 
 function renderWeekChildFilter() {
 	const current = weekChildFilter;
-	els.weekChildFilter.innerHTML = `<option value="all">전체 학생</option>${children.map((child) => `<option value="${child}">${child}</option>`).join("")}`;
-	els.weekChildFilter.value = children.includes(current) ? current : "all";
+	els.weekChildFilter.innerHTML = `
+		<option value="active">표시 학생</option>
+		<option value="hidden">숨김 학생</option>
+		<option value="all">전체 학생</option>
+	`;
+	els.weekChildFilter.value = ["active", "hidden", "all"].includes(current) ? current : "active";
 }
 
 function renderWeekSubjectFilter() {
@@ -1063,10 +1330,10 @@ function renderSubjectFilters() {
 	const subjectValue = els.historySubject.value || "all";
 	const subjects = getAllSubjects();
 
-	els.historyChild.innerHTML = `<option value="all">전체 학생</option>${children.map((child) => `<option value="${child}">${child}</option>`).join("")}`;
+	els.historyChild.innerHTML = `<option value="all">전체 학생</option>${state.childAccounts.map((child) => `<option value="${escapeHtml(getChildKey(child))}">${escapeHtml(getChildOptionLabel(child))}</option>`).join("")}`;
 	els.historySubjectSetting.innerHTML = `<option value="all">전체 과목</option>${state.subjectSettings.map((subject) => `<option value="${escapeHtml(subject.id)}">${escapeHtml(subject.name)}</option>`).join("")}`;
 	els.historySubject.innerHTML = `<option value="all">전체 교재</option>${subjects
-		.map(({ child, subject }) => `<option value="${child}__${subject.id}">${escapeHtml(child)} · ${escapeHtml(subject.name)} / ${escapeHtml(subject.book)}</option>`)
+		.map(({ child, subject }) => `<option value="${child}__${subject.id}">${escapeHtml(getChildName(child))} · ${escapeHtml(subject.name)} / ${escapeHtml(subject.book)}</option>`)
 		.join("")}`;
 
 	els.historyChild.value = children.includes(childValue) ? childValue : "all";
@@ -1079,7 +1346,7 @@ function renderPendingFilters() {
 	const childValue = els.pendingChild.value || "all";
 	const subjectSettingValue = els.pendingSubjectSetting.value || "all";
 
-	els.pendingChild.innerHTML = `<option value="all">전체 학생</option>${children.map((child) => `<option value="${escapeHtml(child)}">${escapeHtml(child)}</option>`).join("")}`;
+	els.pendingChild.innerHTML = `<option value="all">전체 학생</option>${state.childAccounts.map((child) => `<option value="${escapeHtml(getChildKey(child))}">${escapeHtml(getChildOptionLabel(child))}</option>`).join("")}`;
 	els.pendingSubjectSetting.innerHTML = `<option value="all">전체 과목</option>${state.subjectSettings.map((subject) => `<option value="${escapeHtml(subject.id)}">${escapeHtml(subject.name)}</option>`).join("")}`;
 
 	els.pendingChild.value = children.includes(childValue) ? childValue : "all";
@@ -1087,9 +1354,11 @@ function renderPendingFilters() {
 }
 
 function renderSubjectChildSelect() {
-	const current = els.subjectChild.value || children[0];
-	els.subjectChild.innerHTML = children.map((child) => `<option value="${child}">${child}</option>`).join("");
-	els.subjectChild.value = children.includes(current) ? current : children[0];
+	const childAccounts = getActiveChildAccounts();
+	const childKeys = childAccounts.map(getChildKey);
+	const current = els.subjectChild.value || childKeys[0];
+	els.subjectChild.innerHTML = childAccounts.map((child) => `<option value="${escapeHtml(getChildKey(child))}">${escapeHtml(getChildOptionLabel(child))}</option>`).join("");
+	els.subjectChild.value = childKeys.includes(current) ? current : childKeys[0];
 }
 
 function renderSubjectDropdowns() {
@@ -1162,19 +1431,22 @@ function renderWeeklyChildHead(child, childSubjects, subjectGroups, dates) {
 	const bookCount = childSubjects.length;
 	const rewardTotal = getRewardTotalForChild(child);
 	const hasRewardTotal = rewardTotal.length > 0;
-	const childAccount = state.childAccounts.find((account) => account.name === child);
+	const childAccount = getChildAccount(child);
+	const childName = getChildName(child);
+	const hidden = isChildHidden(childAccount);
 	return `
     <div class="weekly-child-head">
       <div class="weekly-child-title">
         <div class="weekly-child-title-row">
-          <strong>${escapeHtml(child)}</strong>
+          <strong>${escapeHtml(childName)}${hidden ? ` <span class="child-status-badge">숨김</span>` : ""}</strong>
           <p>이번 주 기록 ${count}개 · 교재 ${bookCount}개 · 과목 ${subjectCount}개</p>
         </div>
         <p class="reward-summary">누적 보상 ${escapeHtml(formatRewardTotal(rewardTotal))}</p>
       </div>
       <div class="weekly-child-actions">
-        <button type="button" data-weekly-open-book-dialog="${escapeHtml(child)}">교재 등록</button>
+        <button type="button" data-weekly-open-book-dialog="${escapeHtml(child)}" ${isServiceExpired() ? `disabled title="${escapeHtml(getServiceExpiredMessage())}"` : ""}>교재 등록</button>
         <button class="ghost" type="button" data-weekly-child-edit="${escapeHtml(childAccount?.id || "")}" ${childAccount ? "" : "disabled"}>수정</button>
+        <button class="ghost" type="button" data-weekly-child-status="${escapeHtml(childAccount?.id || "")}" data-next-status="${hidden ? "active" : "hidden"}" ${childAccount ? "" : "disabled"}>${hidden ? "복원" : "숨김"}</button>
         <button class="ghost timetable-button" type="button" data-child="${escapeHtml(child)}">시간표 출력</button>
         <button class="ghost reward-reset-button" type="button" data-child="${escapeHtml(child)}" ${hasRewardTotal ? "" : "disabled"}>보상 지급 완료</button>
         <button class="danger" type="button" data-weekly-child-delete="${escapeHtml(childAccount?.id || "")}" ${childAccount ? "" : "disabled"}>삭제</button>
@@ -1184,8 +1456,8 @@ function renderWeeklyChildHead(child, childSubjects, subjectGroups, dates) {
 }
 
 function renderTable() {
-	if (getAllSubjects().length === 0) {
-		els.weeklyTable.innerHTML = `<div class="empty-state">학생을 선택한 뒤 과목과 교재를 먼저 추가하세요.</div>`;
+	if (state.childAccounts.length === 0) {
+		els.weeklyTable.innerHTML = `<div class="empty-state">학생을 먼저 등록하세요.</div>`;
 		return;
 	}
 
@@ -1213,7 +1485,7 @@ function renderTable() {
 
 			if (childSubjects.length === 0) {
 				return `
-          <section class="weekly-child-section" aria-label="${escapeHtml(child)} 주간 학습">
+          <section class="weekly-child-section" aria-label="${escapeHtml(getChildName(child))} 주간 학습">
             ${renderWeeklyChildHead(child, childSubjects, subjectGroups, dates)}
             <div class="weekly-child-table-wrap">
               <div class="empty-state compact">교재 기간을 확인하거나 새 교재를 등록하세요.</div>
@@ -1235,6 +1507,9 @@ function renderTable() {
 									const memo = entry?.memo?.trim();
 									const completed = Boolean(entry?.completed);
 									const planned = Boolean(entry && !completed && !amount && !memo);
+									const attachmentBadge = completed
+										? `<span class="attachment-count-badge" data-weekly-attachment-count data-child="${escapeHtml(child)}" data-subject-id="${escapeHtml(subject.id)}" data-date="${dateKey}" hidden></span>`
+										: "";
 									return `
                 <td>
                   <button class="entry-cell ${entry ? "has-entry" : ""} ${completed ? "is-complete" : ""} ${planned ? "is-planned" : ""}" type="button"
@@ -1244,6 +1519,7 @@ function renderTable() {
 							? `<span class="entry-status-row">
                             ${completed ? `<span class="entry-status">완료</span>` : `<span class="entry-status pending">진행중</span>`}
                             ${entry.rewardAwarded ? `<span class="reward-badge">+${escapeHtml(formatReward(entry.rewardAmount, entry.rewardLabel))}</span>` : ""}
+                            ${attachmentBadge}
                           </span>
                           ${
 								!planned
@@ -1272,7 +1548,7 @@ function renderTable() {
                 <div class="book-title-row">
                   <span class="book-title">${escapeHtml(subject.book)}</span>
                   <div class="book-actions">
-                    <button class="book-menu-btn" type="button" aria-label="${escapeHtml(child)} ${escapeHtml(subject.book)} 메뉴"
+                    <button class="book-menu-btn" type="button" aria-label="${escapeHtml(getChildName(child))} ${escapeHtml(subject.book)} 메뉴"
                       data-child="${escapeHtml(child)}" data-subject-id="${escapeHtml(subject.id)}">···</button>
                     <div class="book-menu" hidden>
                       <button class="edit-book" type="button" data-child="${escapeHtml(child)}" data-subject-id="${escapeHtml(subject.id)}">수정</button>
@@ -1293,7 +1569,7 @@ function renderTable() {
 				.join("");
 
 			return `
-        <section class="weekly-child-section" aria-label="${escapeHtml(child)} 주간 학습">
+        <section class="weekly-child-section" aria-label="${escapeHtml(getChildName(child))} 주간 학습">
           ${renderWeeklyChildHead(child, childSubjects, subjectGroups, dates)}
           <div class="weekly-child-table-wrap">
             <table class="weekly-child-table">${head}<tbody>${rows}</tbody></table>
@@ -1304,7 +1580,50 @@ function renderTable() {
 		.join("");
 
 	els.weeklyTable.innerHTML = sections ? `<div class="weekly-child-sections">${sections}</div>` : `<div class="empty-state">검색 조건에 맞는 학생이나 교재가 없습니다.</div>`;
+	refreshWeeklyAttachmentBadges();
 }
+
+async function fetchEntryAttachmentCount({ child, subjectId, date }) {
+	const params = new URLSearchParams({
+		childId: child,
+		child: getChildName(child),
+		subjectId,
+		date,
+	});
+	const response = await fetch(`/api/attachments/entry?${params}`, {
+		headers: {
+			Authorization: `Bearer ${authToken}`,
+		},
+	});
+	const data = await response.json().catch(() => ({}));
+	if (!response.ok) throw new Error(data.message || "첨부 사진 정보를 불러오지 못했습니다.");
+	return (data.attachments || []).length;
+}
+
+function refreshWeeklyAttachmentBadges() {
+	const badges = Array.from(document.querySelectorAll("[data-weekly-attachment-count]"));
+	const entryMap = new Map();
+	badges.forEach((badge) => {
+		const child = badge.dataset.child || "";
+		const subjectId = badge.dataset.subjectId || "";
+		const date = badge.dataset.date || "";
+		if (!child || !subjectId || !date) return;
+		entryMap.set(`${child}__${subjectId}__${date}`, { child, subjectId, date });
+	});
+
+	entryMap.forEach((entry) => {
+		fetchEntryAttachmentCount(entry)
+			.then((count) => {
+				document.querySelectorAll("[data-weekly-attachment-count]").forEach((badge) => {
+					if (badge.dataset.child !== getEntryChildKey(entry) || badge.dataset.subjectId !== entry.subjectId || badge.dataset.date !== entry.date) return;
+					badge.hidden = count <= 0;
+					badge.textContent = count > 0 ? `사진 ${count}` : "";
+				});
+			})
+			.catch(() => {});
+	});
+}
+
 function renderHistory() {
 	const search = els.historySearch.value.trim().toLowerCase();
 	const childFilter = els.historyChild.value;
@@ -1315,11 +1634,11 @@ function renderHistory() {
 		.filter((entry) => {
 			const subject = getSubjectForEntry(entry);
 			if (!subject) return false;
-			if (childFilter !== "all" && entry.child !== childFilter) return false;
+			if (childFilter !== "all" && getEntryChildKey(entry) !== childFilter) return false;
 			if (subjectSettingFilter !== "all" && getSubjectSetting(subject)?.id !== subjectSettingFilter) return false;
-			if (subjectFilter !== "all" && `${entry.child}__${entry.subjectId}` !== subjectFilter) return false;
+			if (subjectFilter !== "all" && `${getEntryChildKey(entry)}__${entry.subjectId}` !== subjectFilter) return false;
 			if (!search) return true;
-			return [entry.child, subject.name, subject.book, formatSchedule(subject), entry.amount, entry.memo, entry.date].join(" ").toLowerCase().includes(search);
+			return [getChildName(getEntryChildKey(entry)), subject.name, subject.book, formatSchedule(subject), entry.amount, entry.memo, entry.date].join(" ").toLowerCase().includes(search);
 		})
 		.sort((a, b) => b.date.localeCompare(a.date))
 		.slice(0, 80);
@@ -1334,7 +1653,7 @@ function renderHistory() {
 			const subject = getSubjectForEntry(entry);
 			return `
         <article class="history-item">
-          <strong><span class="subject-color-dot" style="${escapeHtml(subjectDotStyle(subject))}" aria-hidden="true"></span>${entry.date} · ${entry.child} · ${escapeHtml(subject.name)}</strong>
+          <strong><span class="subject-color-dot" style="${escapeHtml(subjectDotStyle(subject))}" aria-hidden="true"></span>${entry.date} · ${escapeHtml(getChildName(getEntryChildKey(entry)))} · ${escapeHtml(subject.name)}</strong>
           <p>${escapeHtml(subject.book)} · ${escapeHtml(entry.amount || "학습량 미입력")}</p>
           ${entry.memo ? `<p>${escapeHtml(entry.memo)}</p>` : ""}
         </article>
@@ -1357,7 +1676,7 @@ function renderPendingPlans() {
 			({ child, subject, date, entry, isOverdue }) => `
       <article class="pending-plan-item ${isOverdue ? "is-overdue" : ""}">
         <div>
-          <strong><span class="subject-color-dot" style="${escapeHtml(subjectDotStyle(subject))}" aria-hidden="true"></span>${escapeHtml(child)} · ${escapeHtml(subject.name)} · ${escapeHtml(subject.book)}</strong>
+          <strong><span class="subject-color-dot" style="${escapeHtml(subjectDotStyle(subject))}" aria-hidden="true"></span>${escapeHtml(getChildName(child))} · ${escapeHtml(subject.name)} · ${escapeHtml(subject.book)}</strong>
           <p>${escapeHtml(date)} · ${escapeHtml(formatSchedule(subject))}</p>
           ${entry?.memo ? `<p>${escapeHtml(entry.memo)}</p>` : ""}
         </div>
@@ -1432,7 +1751,7 @@ function renderStats() {
 	const completedWeekEntries = weekEntries.filter((entry) => entry.completed);
 	const totalActiveBooks = children.reduce((count, child) => count + getActiveSubjectsForChild(child).length, 0);
 	const weeklyCompletionRate = weekEntries.length ? Math.round((completedWeekEntries.length / weekEntries.length) * 100) : 0;
-	const activeChildCount = new Set(weekEntries.map((entry) => entry.child)).size;
+	const activeChildCount = new Set(weekEntries.map(getEntryChildKey)).size;
 
 	els.statsContent.innerHTML = `
     <div class="page-tools">
@@ -1536,7 +1855,7 @@ function renderRewardHistory() {
 }
 
 function renderChildStatsBar(child, weekEntries) {
-	const childEntries = weekEntries.filter((entry) => entry.child === child);
+	const childEntries = weekEntries.filter((entry) => getEntryChildKey(entry) === child);
 	const completed = childEntries.filter((entry) => entry.completed).length;
 	const rate = childEntries.length ? Math.round((completed / childEntries.length) * 100) : 0;
 
@@ -1619,92 +1938,105 @@ function renderWeeklyTrend(entries) {
 }
 
 function renderMyPage() {
-	const entries = Object.values(state.entries);
-	const totalBooks = getAllSubjects().length;
-	const totalEntries = entries.length;
-	const completedEntries = entries.filter((entry) => entry.completed).length;
-	const completionRate = totalEntries ? Math.round((completedEntries / totalEntries) * 100) : 0;
-	const activeBooks = children.reduce((count, child) => count + getActiveSubjectsForChild(child).length, 0);
+	const planDetails = getProfilePlanDetails(state.profile);
+	const planGradientFrom = normalizePlanColor(state.profile?.plan?.gradientFrom, planDetails.isPaid ? "#426f96" : "#64748b");
+	const planGradientTo = normalizePlanColor(state.profile?.plan?.gradientTo, planDetails.isPaid ? "#2ba889" : "#94a3b8");
+	const profileImageUrl = String(state.profile.profileImageUrl || "").trim();
+	const teacherComment = String(state.profile.teacherComment || "").trim();
+	const avatarMarkup = profileImageUrl
+		? `<img src="${escapeHtml(profileImageUrl)}" alt="" />`
+		: escapeHtml((state.profile.name || "S").slice(0, 1));
 	const pushPanelMarkup = shouldShowWebPushPanel()
 		? `
-    <div class="profile-panel push-panel">
-      <div>
-        <p class="eyebrow">Push Notification</p>
-        <h3>푸시 알림</h3>
-        <p data-push-status>${escapeHtml(getPushStatusText())}</p>
-      </div>
-      <div class="profile-panel-actions push-panel-actions">
-        <button class="ghost logout-button" type="button" data-push-toggle ${pushState.supported ? "" : "disabled"}>${pushState.subscribed ? "수신 해제" : "수신 등록"}</button>
-      </div>
-      <p class="form-message" data-push-message></p>
-    </div>
+    <section class="mypage-menu-section mypage-push-section" aria-label="푸시 알림">
+      <button class="mypage-menu-row" type="button" data-push-toggle ${pushState.supported ? "" : "disabled"}>
+        <span class="mypage-menu-icon is-push" aria-hidden="true"></span>
+        <span class="mypage-menu-main">
+          <strong>푸시 알림</strong>
+          <small data-push-status>${escapeHtml(getPushStatusText())}</small>
+          <small class="form-message" data-push-message></small>
+        </span>
+        <span class="mypage-menu-value">${pushState.subscribed ? "수신 중" : "설정"}</span>
+        <span class="mypage-entry-arrow">›</span>
+      </button>
+    </section>
 `
 		: "";
 
 	els.mypageContent.innerHTML = `
-    <div class="profile-panel">
-      <div>
-        <p class="eyebrow">Study Profile</p>
-        <h3>${escapeHtml(state.profile.name)}</h3>
-        <p>${escapeHtml(state.profile.email)}</p>
+    <section class="mypage-hero" aria-label="내 계정">
+      <div class="mypage-hero-main">
+        <button class="mypage-avatar-large profile-photo-button" type="button" data-profile-photo-open aria-label="프로필 사진 수정">${avatarMarkup}<span class="profile-photo-camera" aria-hidden="true"></span></button>
+        <input type="file" accept="image/jpeg,image/png,image/webp" hidden data-profile-photo-input />
+        <div class="mypage-hero-copy">
+          <p>안녕하세요,</p>
+          <h3>${escapeHtml(state.profile.name)}님</h3>
+          <span>${escapeHtml(state.profile.email)}</span>
+        </div>
       </div>
-      <div class="profile-panel-actions">
-        <a class="profile-edit-button" href="./profile.html">내 정보 수정</a>
-        <button class="ghost logout-button" type="button" data-logout-button>로그아웃</button>
+      <div class="mypage-hero-side">
+        <div class="mypage-hero-actions">
+          <a class="profile-edit-button" href="./profile.html">내 정보 수정</a>
+          <button class="ghost logout-button" type="button" data-logout-button>로그아웃</button>
+        </div>
       </div>
-    </div>
+      <div class="mypage-teacher-comment">
+        <label for="mypageTeacherComment">선생님 한마디</label>
+        <div class="mypage-teacher-comment-row">
+          <input id="mypageTeacherComment" type="text" maxlength="200" data-teacher-comment-input placeholder="학생에게 보여줄 한마디를 입력하세요." value="${escapeHtml(teacherComment)}">
+          <button type="button" data-teacher-comment-save>저장</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="mypage-plan-card ${planDetails.isExpired ? "is-expired" : ""}" aria-label="이용플랜" style="--plan-gradient-from: ${escapeHtml(planGradientFrom)}; --plan-gradient-to: ${escapeHtml(planGradientTo)};">
+      <div class="mypage-plan-main">
+        <div>
+          <p class="eyebrow">Subscription</p>
+          <h3>${escapeHtml(planDetails.name)}</h3>
+          <p>${escapeHtml(planDetails.periodText)}${planDetails.isExpired ? " · 만료됨" : ""}</p>
+        </div>
+        <div class="mypage-plan-price">
+          <strong>${escapeHtml(planDetails.priceText)}</strong>
+          <span>학생 ${escapeHtml(planDetails.limitText)}</span>
+        </div>
+      </div>
+      <div class="mypage-plan-actions">
+        ${planDetails.isPaid ? `<button type="button" data-plan-extend>기간 연장</button>` : ""}
+        <a href="./payment.html">결제 현황</a>
+        <button type="button" data-plan-change>요금제 변경</button>
+      </div>
+    </section>
 
     ${pushPanelMarkup}
 
-    <div class="profile-panel">
-      <div>
-        <p class="eyebrow">Study Summary</p>
-        <h3>전체 학생 학습 현황</h3>
-        <p>현재 주간 범위 ${escapeHtml(getCurrentWeekRangeText())} 기준으로 표시 중인 교재와 전체 기록을 모았습니다.</p>
-      </div>
-      <div class="profile-summary-stats">
-        <article>
-          <span>등록 교재</span>
-          <strong>${totalBooks}</strong>
-        </article>
-        <article>
-          <span>이번 주 표시 교재</span>
-          <strong>${activeBooks}</strong>
-        </article>
-        <article>
-          <span>전체 학습 기록</span>
-          <strong>${totalEntries}</strong>
-        </article>
-        <article>
-          <span>완료율</span>
-          <strong>${completionRate}%</strong>
-        </article>
-      </div>
-    </div>
-
-    <div class="mypage-entry-list">
-      <button class="mypage-entry-card" type="button" data-target-page="subjects">
-        <div class="mypage-entry-info">
+    <section class="mypage-menu-section" aria-label="마이페이지 메뉴">
+      <button class="mypage-menu-row" type="button" data-target-page="subjects">
+        <span class="mypage-menu-icon is-subject" aria-hidden="true"></span>
+        <span class="mypage-menu-main">
           <strong>과목 설정</strong>
-          <p>과목 ${state.subjectSettings.length}개 설정됨</p>
-        </div>
+          <small>교재 등록에 사용할 과목 관리</small>
+        </span>
+        <span class="mypage-menu-value">${state.subjectSettings.length}개</span>
         <span class="mypage-entry-arrow">›</span>
       </button>
-      <button class="mypage-entry-card" type="button" data-target-page="settings">
-        <div class="mypage-entry-info">
+      <button class="mypage-menu-row" type="button" data-target-page="settings">
+        <span class="mypage-menu-icon is-settings" aria-hidden="true"></span>
+        <span class="mypage-menu-main">
           <strong>환경설정</strong>
-          <p>화면 테마와 앱 사용 환경 설정</p>
-        </div>
+          <small>화면 테마와 앱 사용 환경</small>
+        </span>
         <span class="mypage-entry-arrow">›</span>
       </button>
-      <button class="mypage-entry-card" type="button" data-target-page="accesslogs">
-        <div class="mypage-entry-info">
+      <button class="mypage-menu-row" type="button" data-target-page="accesslogs">
+        <span class="mypage-menu-icon is-log" aria-hidden="true"></span>
+        <span class="mypage-menu-main">
           <strong>접속 로그</strong>
-          <p>최근 6개월간 계정 접속 기록</p>
-        </div>
+          <small>최근 6개월 계정 접속 기록</small>
+        </span>
         <span class="mypage-entry-arrow">›</span>
       </button>
-    </div>
+    </section>
   `;
 
 	if (typeof applyTheme === "function" && typeof getSavedTheme === "function") {
@@ -1807,7 +2139,9 @@ function updatePushPanel() {
 	const button = els.mypageContent.querySelector("[data-push-toggle]");
 	if (status) status.textContent = getPushStatusText();
 	if (button) {
-		button.textContent = pushState.subscribed ? "수신 해제" : "수신 등록";
+		const value = button.querySelector(".mypage-menu-value");
+		if (value) value.textContent = pushState.subscribed ? "수신 중" : "설정";
+		else button.textContent = pushState.subscribed ? "수신 해제" : "수신 등록";
 		button.disabled = !pushState.supported;
 	}
 }
@@ -1904,7 +2238,6 @@ function renderSettingsPage() {
 	els.startupScreenModeInputs.forEach((input) => {
 		input.checked = input.value === userSettings.startupScreenMode;
 	});
-	window.StudyFlowAppLock?.renderSettings(els.teacherAppLockSettings);
 }
 
 function updateWeekStartMode(mode) {
@@ -1978,6 +2311,10 @@ function openSubjectDialogForChild(child) {
 function openChildAccountDialog(accountId = "", options = {}) {
 	const account = state.childAccounts.find((item) => item.id === accountId);
 	isForcingChildRegistration = Boolean(options.required && !account && state.childAccounts.length === 0);
+	if (!account && !isForcingChildRegistration && !canAddChildAccount()) {
+		alert(getStudentLimitMessage());
+		return;
+	}
 	activeChildEdit = account ? { id: account.id, originalName: account.name } : null;
 	els.childAccountMeta.textContent = account ? "Student Account Edit" : "Student Account";
 	els.childAccountTitle.textContent = isForcingChildRegistration ? "첫 학생 등록" : account ? "학생 수정" : "학생 등록";
@@ -2024,6 +2361,10 @@ function saveChildAccount(event) {
 	const editingId = activeChildEdit?.id || "";
 
 	if (!name) return;
+	if (!activeChildEdit && !canAddChildAccount()) {
+		alert(getStudentLimitMessage());
+		return;
+	}
 	if (!isValidKoreanMobilePhone(phone)) {
 		alert("학생 휴대폰은 01n-nnnn-nnnn 형식으로 입력하세요.");
 		focusDialogField(els.childPhone);
@@ -2032,10 +2373,6 @@ function saveChildAccount(event) {
 	if (!isValidKoreanMobilePhone(parentPhone)) {
 		alert("학부모 휴대폰은 01n-nnnn-nnnn 형식으로 입력하세요.");
 		focusDialogField(els.childParentPhone);
-		return;
-	}
-	if (state.childAccounts.some((account) => account.id !== editingId && account.name === name)) {
-		alert("이미 등록된 학생 이름입니다.");
 		return;
 	}
 	if (loginId && state.childAccounts.some((account) => account.id !== editingId && account.loginId === loginId)) {
@@ -2066,7 +2403,6 @@ function saveChildAccount(event) {
 	if (activeChildEdit) {
 		const account = existingAccount;
 		if (!account) return;
-		renameChildData(activeChildEdit.originalName, name);
 		account.name = name;
 		account.birthMonth = birthMonth;
 		account.phone = phone;
@@ -2074,7 +2410,7 @@ function saveChildAccount(event) {
 		account.loginId = existingLoginId || loginId;
 		if (password) account.password = password;
 	} else {
-		state.childAccounts.push({
+		const newAccount = {
 			id: crypto.randomUUID(),
 			name,
 			birthMonth,
@@ -2082,13 +2418,14 @@ function saveChildAccount(event) {
 			parentPhone,
 			loginId,
 			password,
-		});
-		state.subjectsByChild[name] = [];
+		};
+		state.childAccounts.push(newAccount);
+		state.subjectsByChild[getChildKey(newAccount)] = [];
 	}
 
 	state.childAccounts = sortChildAccountsByBirth(state.childAccounts);
 	children = getChildNamesFromState();
-	weekChildFilter = children.includes(weekChildFilter) ? weekChildFilter : "all";
+	weekChildFilter = ["active", "hidden", "all"].includes(weekChildFilter) ? weekChildFilter : "active";
 	activeChildEdit = null;
 	isForcingChildRegistration = false;
 	els.childAccountDialog.classList.remove("is-required-registration");
@@ -2119,19 +2456,6 @@ function verifyChildLoginId() {
 	alert(isDuplicate ? "이미 사용 중인 학생 아이디입니다." : "사용할 수 있는 학생 아이디입니다.");
 }
 
-function renameChildData(oldName, newName) {
-	if (oldName === newName) return;
-	state.subjectsByChild[newName] = state.subjectsByChild[oldName] || [];
-	delete state.subjectsByChild[oldName];
-	Object.values(state.entries).forEach((entry) => {
-		if (entry.child === oldName) {
-			entry.child = newName;
-			entry.key = entryKey(newName, entry.subjectId, entry.date);
-		}
-	});
-	rebuildEntryKeys();
-}
-
 function deleteChildAccount(accountId) {
 	const account = state.childAccounts.find((item) => item.id === accountId);
 	if (!account) return;
@@ -2143,14 +2467,22 @@ function deleteChildAccount(accountId) {
 	if (!confirmed) return;
 
 	state.childAccounts = state.childAccounts.filter((item) => item.id !== accountId);
-	delete state.subjectsByChild[account.name];
+	delete state.subjectsByChild[account.id];
 	Object.keys(state.entries).forEach((key) => {
-		if (state.entries[key].child === account.name) {
+		if (getEntryChildKey(state.entries[key]) === account.id) {
 			delete state.entries[key];
 		}
 	});
 	children = getChildNamesFromState();
-	weekChildFilter = children.includes(weekChildFilter) ? weekChildFilter : "all";
+	weekChildFilter = ["active", "hidden", "all"].includes(weekChildFilter) ? weekChildFilter : "active";
+	saveState();
+	render();
+}
+
+function updateChildStatus(accountId, status) {
+	const account = state.childAccounts.find((item) => item.id === accountId);
+	if (!account) return;
+	account.status = normalizeChildStatus(status);
 	saveState();
 	render();
 }
@@ -2259,7 +2591,7 @@ function clearSubjectDragState() {
 
 function rebuildEntryKeys() {
 	state.entries = Object.values(state.entries).reduce((entries, entry) => {
-		const key = entryKey(entry.child, entry.subjectId, entry.date);
+		const key = entryKey(getEntryChildKey(entry), entry.subjectId, entry.date);
 		entries[key] = { ...entry, key };
 		return entries;
 	}, {});
@@ -2275,7 +2607,7 @@ function openEntryDialog(button) {
 	const entry = state.entries[key];
 
 	activeEntry = { child, subjectId, date, key };
-	els.entryMeta.textContent = `${date} · ${child}`;
+	els.entryMeta.textContent = `${date} · ${getChildName(child)}`;
 	els.entryTitle.textContent = `${subject.name} / ${subject.book}`;
 	els.entryAmount.value = entry?.amount || "";
 	els.entryMinimumStudyMinutes.value = String(getEntryMinimumStudyMinutes(entry, subject));
@@ -2286,6 +2618,7 @@ function openEntryDialog(button) {
 		els.entryStudyStartedAt.textContent = entry?.studyStartedAt ? formatDateTime(entry.studyStartedAt) : "-";
 		els.entryStudyDuration.textContent = formatStudyDurationSeconds(entry?.studyDurationSeconds) || "-";
 		els.entryStudentFeedback.textContent = entry?.studentFeedback?.trim() || "-";
+		renderEntryAttachments(entry);
 	}
 	els.deleteEntry.hidden = !entry;
 	const futureEntries = getEntriesFromDate(child, subjectId, date);
@@ -2293,6 +2626,336 @@ function openEntryDialog(button) {
 	els.pullPlan.hidden = futureEntries.length === 0;
 	els.entryDialog.showModal();
 	focusDialogField(els.entryAmount);
+}
+
+function openEntryPage(button) {
+	if (!button) return;
+	window.location.href = `./entry.html?childId=${encodeURIComponent(button.dataset.child || "")}&subjectId=${encodeURIComponent(button.dataset.subjectId || "")}&date=${encodeURIComponent(button.dataset.date || "")}`;
+}
+
+function clearEntryAttachmentObjectUrls() {
+	entryAttachmentObjectUrls.forEach((url) => URL.revokeObjectURL(url));
+	entryAttachmentObjectUrls = [];
+}
+
+function getAttachmentGallery() {
+	let gallery = document.querySelector("#attachmentGallery");
+	if (gallery) return gallery;
+	gallery = document.createElement("div");
+	gallery.id = "attachmentGallery";
+	gallery.className = "attachment-gallery";
+	gallery.hidden = true;
+	gallery.innerHTML = `
+    <div class="attachment-gallery-backdrop" data-gallery-close></div>
+    <div class="attachment-gallery-panel" role="dialog" aria-modal="true" aria-label="첨부 사진 보기">
+      <button class="attachment-gallery-close" type="button" data-gallery-close aria-label="닫기">×</button>
+      <button class="attachment-gallery-nav attachment-gallery-prev" type="button" data-gallery-prev aria-label="이전 사진">‹</button>
+      <img class="attachment-gallery-image" alt="">
+      <button class="attachment-gallery-nav attachment-gallery-next" type="button" data-gallery-next aria-label="다음 사진">›</button>
+      <div class="attachment-gallery-caption">
+        <strong data-gallery-title></strong>
+        <span data-gallery-count></span>
+      </div>
+      <div class="attachment-gallery-tools" aria-label="사진 보기 도구">
+        <button type="button" data-gallery-rotate-left aria-label="왼쪽으로 회전"><span>↺</span><b>왼쪽 회전</b></button>
+        <button type="button" data-gallery-rotate-right aria-label="오른쪽으로 회전"><span>↻</span><b>오른쪽 회전</b></button>
+        <button type="button" data-gallery-zoom-out aria-label="축소"><span>−</span><b>축소</b></button>
+        <button type="button" data-gallery-zoom-reset aria-label="원본 크기"><span>1:1</span><b>원본</b></button>
+        <button type="button" data-gallery-zoom-in aria-label="확대"><span>+</span><b>확대</b></button>
+      </div>
+    </div>
+  `;
+	(els.entryDialog || document.body).appendChild(gallery);
+	gallery.addEventListener("click", (event) => {
+		if (event.target.closest("[data-gallery-close]")) closeAttachmentGallery();
+		if (event.target.closest("[data-gallery-prev]")) moveAttachmentGallery(-1);
+		if (event.target.closest("[data-gallery-next]")) moveAttachmentGallery(1);
+		if (event.target.closest("[data-gallery-rotate-left]")) rotateAttachmentGallery(-90);
+		if (event.target.closest("[data-gallery-rotate-right]")) rotateAttachmentGallery(90);
+		if (event.target.closest("[data-gallery-zoom-out]")) zoomAttachmentGallery(-0.25);
+		if (event.target.closest("[data-gallery-zoom-in]")) zoomAttachmentGallery(0.25);
+		if (event.target.closest("[data-gallery-zoom-reset]")) resetAttachmentGalleryZoom();
+	});
+	gallery.addEventListener("pointerdown", handleAttachmentGalleryPointerDown);
+	gallery.addEventListener("pointermove", handleAttachmentGalleryPointerMove);
+	gallery.addEventListener("pointerup", handleAttachmentGalleryPointerUp);
+	gallery.addEventListener("pointercancel", handleAttachmentGalleryPointerUp);
+	return gallery;
+}
+
+function updateAttachmentGallery() {
+	const gallery = getAttachmentGallery();
+	const item = attachmentGalleryState.items[attachmentGalleryState.index];
+	const image = gallery.querySelector(".attachment-gallery-image");
+	const title = gallery.querySelector("[data-gallery-title]");
+	const count = gallery.querySelector("[data-gallery-count]");
+	const prev = gallery.querySelector("[data-gallery-prev]");
+	const next = gallery.querySelector("[data-gallery-next]");
+	if (!item || !image || !title || !count) return;
+	image.src = item.url;
+	image.alt = item.name || "첨부 사진";
+	image.style.transform = `rotate(${attachmentGalleryState.rotations[item.id] || 0}deg) scale(${attachmentGalleryState.zooms[item.id] || 1})`;
+	title.textContent = item.name || "첨부 사진";
+	count.textContent = `${attachmentGalleryState.index + 1} / ${attachmentGalleryState.items.length}`;
+	const single = attachmentGalleryState.items.length <= 1;
+	if (prev) prev.disabled = single;
+	if (next) next.disabled = single;
+}
+
+function moveAttachmentGallery(direction) {
+	const total = attachmentGalleryState.items.length;
+	if (!total) return;
+	attachmentGalleryState.index = (attachmentGalleryState.index + direction + total) % total;
+	updateAttachmentGallery();
+}
+
+function rotateAttachmentGallery(degrees) {
+	const item = attachmentGalleryState.items[attachmentGalleryState.index];
+	if (!item) return;
+	const current = attachmentGalleryState.rotations[item.id] || 0;
+	attachmentGalleryState.rotations[item.id] = (current + degrees + 360) % 360;
+	updateAttachmentGallery();
+}
+
+function zoomAttachmentGallery(delta) {
+	const item = attachmentGalleryState.items[attachmentGalleryState.index];
+	if (!item) return;
+	const current = attachmentGalleryState.zooms[item.id] || 1;
+	setAttachmentGalleryZoom(item, current + delta);
+}
+
+function setAttachmentGalleryZoom(item, zoom) {
+	attachmentGalleryState.zooms[item.id] = Math.max(0.5, Math.min(3, Math.round(zoom * 100) / 100));
+	updateAttachmentGallery();
+}
+
+function resetAttachmentGalleryZoom() {
+	const item = attachmentGalleryState.items[attachmentGalleryState.index];
+	if (!item) return;
+	attachmentGalleryState.zooms[item.id] = 1;
+	updateAttachmentGallery();
+}
+
+function getPointerDistance(first, second) {
+	return Math.hypot(first.x - second.x, first.y - second.y);
+}
+
+function handleAttachmentGalleryPointerDown(event) {
+	if (!event.target.closest(".attachment-gallery-image")) return;
+	event.preventDefault();
+	event.currentTarget.setPointerCapture?.(event.pointerId);
+	attachmentGalleryState.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+	if (attachmentGalleryState.pointers.size === 1) {
+		attachmentGalleryState.dragStart = { x: event.clientX, y: event.clientY };
+	}
+	if (attachmentGalleryState.pointers.size === 2) {
+		const [first, second] = [...attachmentGalleryState.pointers.values()];
+		const item = attachmentGalleryState.items[attachmentGalleryState.index];
+		attachmentGalleryState.pinchStart = {
+			distance: getPointerDistance(first, second),
+			zoom: item ? attachmentGalleryState.zooms[item.id] || 1 : 1,
+		};
+	}
+}
+
+function handleAttachmentGalleryPointerMove(event) {
+	if (!attachmentGalleryState.pointers.has(event.pointerId)) return;
+	event.preventDefault();
+	attachmentGalleryState.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+	if (attachmentGalleryState.pointers.size !== 2 || !attachmentGalleryState.pinchStart) return;
+	const [first, second] = [...attachmentGalleryState.pointers.values()];
+	const item = attachmentGalleryState.items[attachmentGalleryState.index];
+	if (!item) return;
+	const nextZoom = attachmentGalleryState.pinchStart.zoom * (getPointerDistance(first, second) / attachmentGalleryState.pinchStart.distance);
+	setAttachmentGalleryZoom(item, nextZoom);
+}
+
+function handleAttachmentGalleryPointerUp(event) {
+	const wasPinching = attachmentGalleryState.pointers.size > 1;
+	attachmentGalleryState.pointers.delete(event.pointerId);
+	if (!wasPinching && attachmentGalleryState.dragStart) {
+		const dx = event.clientX - attachmentGalleryState.dragStart.x;
+		const dy = event.clientY - attachmentGalleryState.dragStart.y;
+		const item = attachmentGalleryState.items[attachmentGalleryState.index];
+		const zoom = item ? attachmentGalleryState.zooms[item.id] || 1 : 1;
+		if (Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy) * 1.4 && zoom <= 1.05) {
+			moveAttachmentGallery(dx < 0 ? 1 : -1);
+		}
+	}
+	if (attachmentGalleryState.pointers.size < 2) attachmentGalleryState.pinchStart = null;
+	if (attachmentGalleryState.pointers.size === 0) attachmentGalleryState.dragStart = null;
+}
+
+function closeAttachmentGallery() {
+	const gallery = getAttachmentGallery();
+	gallery.hidden = true;
+	document.body.classList.remove("is-attachment-gallery-open");
+	if (attachmentGalleryState.keyHandler) {
+		document.removeEventListener("keydown", attachmentGalleryState.keyHandler);
+		attachmentGalleryState.keyHandler = null;
+	}
+}
+
+function openAttachmentGallery(items, index = 0) {
+	const availableItems = items.filter((item) => item.url);
+	if (!availableItems.length) return;
+	attachmentGalleryState.items = availableItems;
+	attachmentGalleryState.index = Math.max(0, Math.min(index, availableItems.length - 1));
+	attachmentGalleryState.rotations = {};
+	attachmentGalleryState.zooms = {};
+	attachmentGalleryState.pointers.clear();
+	attachmentGalleryState.dragStart = null;
+	attachmentGalleryState.pinchStart = null;
+	const gallery = getAttachmentGallery();
+	gallery.hidden = false;
+	document.body.classList.add("is-attachment-gallery-open");
+	updateAttachmentGallery();
+	if (attachmentGalleryState.keyHandler) document.removeEventListener("keydown", attachmentGalleryState.keyHandler);
+	attachmentGalleryState.keyHandler = (event) => {
+		if (event.key === "Escape") closeAttachmentGallery();
+		if (event.key === "ArrowLeft") moveAttachmentGallery(-1);
+		if (event.key === "ArrowRight") moveAttachmentGallery(1);
+		if (event.key.toLowerCase() === "q") rotateAttachmentGallery(-90);
+		if (event.key.toLowerCase() === "e") rotateAttachmentGallery(90);
+		if (event.key === "+" || event.key === "=") zoomAttachmentGallery(0.25);
+		if (event.key === "-") zoomAttachmentGallery(-0.25);
+		if (event.key === "0") resetAttachmentGalleryZoom();
+	};
+	document.addEventListener("keydown", attachmentGalleryState.keyHandler);
+}
+
+function getAiStatusText(status) {
+	if (status === "completed") return "분석 완료";
+	if (status === "analyzing") return "분석 중";
+	if (status === "failed") return "분석 실패";
+	return "분석 전";
+}
+
+function renderEntryAiPanel(attachments = []) {
+	if (!els.entryAiPanel || !els.entryAnalyzeButton || !els.entryAiStatus || !els.entryAiResult) return;
+	const first = attachments[0] || {};
+	const status = first.aiStatus || "none";
+	const result = String(first.aiResult || "").trim();
+	const expired = isServiceExpired();
+	els.entryAiPanel.hidden = attachments.length === 0;
+	els.entryAnalyzeButton.disabled = attachments.length === 0 || status === "analyzing" || expired;
+	els.entryAnalyzeButton.textContent = status === "completed" ? "다시 분석" : status === "analyzing" ? "분석 중" : "AI 분석";
+	els.entryAiStatus.textContent = expired ? "이용기간 만료" : getAiStatusText(status);
+	els.entryAiStatus.classList.toggle("is-error", status === "failed");
+	els.entryAiResult.hidden = !result;
+	els.entryAiResult.innerHTML = result ? escapeHtml(result).replaceAll("\n", "<br>") : "";
+}
+
+async function analyzeActiveEntryAttachments() {
+	if (!activeEntry || !els.entryAnalyzeButton) return;
+	if (isServiceExpired()) {
+		if (els.entryAiStatus) {
+			els.entryAiStatus.textContent = getServiceExpiredMessage();
+			els.entryAiStatus.classList.add("is-error");
+		}
+		showTeacherToast(getServiceExpiredMessage(), true);
+		return;
+	}
+	try {
+		els.entryAnalyzeButton.disabled = true;
+		els.entryAnalyzeButton.textContent = "분석 중";
+		if (els.entryAiStatus) {
+			els.entryAiStatus.textContent = "분석 중";
+			els.entryAiStatus.classList.remove("is-error");
+		}
+		if (els.entryAiResult) {
+			els.entryAiResult.hidden = true;
+			els.entryAiResult.innerHTML = "";
+		}
+		const response = await fetch("/api/attachments/entry/analyze", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${authToken}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				childId: activeEntry.child,
+				child: getChildName(activeEntry.child),
+				subjectId: activeEntry.subjectId,
+				date: activeEntry.date,
+			}),
+		});
+		const data = await response.json().catch(() => ({}));
+		if (!response.ok) throw new Error(data.message || "AI 분석에 실패했습니다.");
+		renderEntryAiPanel(data.attachments || [{ aiStatus: data.aiStatus, aiResult: data.aiResult, aiAnalyzedAt: data.aiAnalyzedAt }]);
+		renderTable();
+	} catch (error) {
+		if (els.entryAiStatus) {
+			els.entryAiStatus.textContent = error.message || "AI 분석에 실패했습니다.";
+			els.entryAiStatus.classList.add("is-error");
+		}
+		if (els.entryAnalyzeButton) {
+			els.entryAnalyzeButton.disabled = false;
+			els.entryAnalyzeButton.textContent = "AI 분석";
+		}
+	}
+}
+
+async function renderEntryAttachments(entry) {
+	if (!els.entryAttachmentsBlock || !els.entryAttachmentList) return;
+	clearEntryAttachmentObjectUrls();
+	els.entryAttachmentList.innerHTML = "";
+	renderEntryAiPanel([]);
+	els.entryAttachmentsBlock.hidden = !entry?.completed;
+	if (!entry?.completed || !activeEntry) return;
+
+	els.entryAttachmentList.innerHTML = `<p class="entry-attachment-empty">첨부 사진을 불러오는 중입니다.</p>`;
+	try {
+		const params = new URLSearchParams({
+			childId: activeEntry.child,
+			child: getChildName(activeEntry.child),
+			subjectId: activeEntry.subjectId,
+			date: activeEntry.date,
+			markViewed: "true",
+		});
+		const response = await fetch(`/api/attachments/entry?${params}`, {
+			headers: { Authorization: `Bearer ${authToken}` },
+		});
+		const data = await response.json().catch(() => ({}));
+		if (!response.ok) throw new Error(data.message || "첨부 사진을 불러오지 못했습니다.");
+		const attachments = data.attachments || [];
+		if (!attachments.length) {
+			els.entryAttachmentsBlock.hidden = true;
+			els.entryAttachmentList.innerHTML = "";
+			renderEntryAiPanel([]);
+			return;
+		}
+
+		els.entryAttachmentsBlock.hidden = false;
+		renderEntryAiPanel(attachments);
+		els.entryAttachmentList.innerHTML = attachments
+			.map((attachment) => `
+        <article class="entry-attachment-item" data-attachment-id="${escapeHtml(attachment.id)}">
+          <button class="entry-attachment-thumb" type="button" data-open-entry-attachment="${escapeHtml(attachment.id)}">불러오는 중</button>
+          <p>${escapeHtml(attachment.originalName || "첨부 사진")}</p>
+        </article>
+      `)
+			.join("");
+
+		await Promise.all(attachments.map(async (attachment) => {
+			const fileResponse = await fetch(attachment.fileUrl, {
+				headers: { Authorization: `Bearer ${authToken}` },
+			});
+			if (!fileResponse.ok) return;
+			const blob = await fileResponse.blob();
+			const url = URL.createObjectURL(blob);
+			entryAttachmentObjectUrls.push(url);
+			const item = els.entryAttachmentList.querySelector(`[data-attachment-id="${CSS.escape(attachment.id)}"]`);
+			const thumb = item?.querySelector(".entry-attachment-thumb");
+			if (thumb) {
+				thumb.innerHTML = `<img src="${url}" alt="${escapeHtml(attachment.originalName || "첨부 사진")}">`;
+				thumb.dataset.attachmentUrl = url;
+				thumb.dataset.attachmentName = attachment.originalName || "첨부 사진";
+			}
+		}));
+	} catch (error) {
+		els.entryAttachmentList.innerHTML = `<p class="entry-attachment-empty">${escapeHtml(error.message || "첨부 사진을 불러오지 못했습니다.")}</p>`;
+	}
 }
 
 function saveEntry() {
@@ -2322,6 +2985,8 @@ function saveEntry() {
 		savedEntry = {
 			...previousEntry,
 			...activeEntry,
+			childId: activeEntry.child,
+			child: getChildName(activeEntry.child),
 			amount,
 			minimumStudyMinutes,
 			memo,
@@ -2359,6 +3024,8 @@ function deleteEntry() {
 }
 
 function closeEntryDialog() {
+	closeAttachmentGallery();
+	clearEntryAttachmentObjectUrls();
 	activeEntry = null;
 	els.entryDialog.close();
 }
@@ -2389,7 +3056,7 @@ function movePlanFromActiveEntry(dayOffset) {
 		}
 	}
 
-	const confirmed = confirm(`${activeEntry.child}의 '${subject.name} / ${subject.book}' 계획 ${entriesToMove.length}개를 ${activeEntry.date}부터 하루씩 ${direction}?`);
+	const confirmed = confirm(`${getChildName(activeEntry.child)}의 '${subject.name} / ${subject.book}' 계획 ${entriesToMove.length}개를 ${activeEntry.date}부터 하루씩 ${direction}?`);
 	if (!confirmed) return;
 
 	const sortedEntries = dayOffset > 0 ? entriesToMove.sort((a, b) => b.date.localeCompare(a.date)) : entriesToMove.sort((a, b) => a.date.localeCompare(b.date));
@@ -2397,7 +3064,7 @@ function movePlanFromActiveEntry(dayOffset) {
 	sortedEntries.forEach((entry) => {
 		delete state.entries[entry.key];
 		const movedDate = formatDate(addDays(parseDate(entry.date), dayOffset));
-		const movedKey = entryKey(entry.child, entry.subjectId, movedDate);
+		const movedKey = entryKey(getEntryChildKey(entry), entry.subjectId, movedDate);
 		state.entries[movedKey] = {
 			...entry,
 			date: movedDate,
@@ -2416,13 +3083,13 @@ function deleteBook(child, subjectId) {
 	const subject = getSubjectsForChild(child).find((item) => item.id === subjectId);
 	if (!subject) return;
 
-	const confirmed = confirm(`${child}의 '${subject.name} / ${subject.book}' 교재를 삭제할까요?\n이 교재의 학습 기록도 함께 삭제됩니다.`);
+	const confirmed = confirm(`${getChildName(child)}의 '${subject.name} / ${subject.book}' 교재를 삭제할까요?\n이 교재의 학습 기록도 함께 삭제됩니다.`);
 	if (!confirmed) return;
 
 	state.subjectsByChild[child] = getSubjectsForChild(child).filter((item) => item.id !== subjectId);
 	Object.keys(state.entries).forEach((key) => {
 		const entry = state.entries[key];
-		if (entry.child === child && entry.subjectId === subjectId) {
+		if (getEntryChildKey(entry) === child && entry.subjectId === subjectId) {
 			delete state.entries[key];
 		}
 	});
@@ -2432,11 +3099,15 @@ function deleteBook(child, subjectId) {
 }
 
 function openBookDialog(child, subjectId) {
+	if (!subjectId && isServiceExpired()) {
+		showTeacherToast(getServiceExpiredMessage(), true);
+		return;
+	}
 	const subject = getSubjectsForChild(child).find((item) => item.id === subjectId);
 	if (!subject) return;
 
 	activeBookEdit = { child, subjectId };
-	els.bookMeta.textContent = child;
+	els.bookMeta.textContent = getChildName(child);
 	renderSubjectDropdowns();
 	renderTimeSelects();
 	els.editSubjectName.value = getSubjectSetting(subject)?.id || "";
@@ -2612,11 +3283,11 @@ function openCopyDialog(child, subjectId) {
 
 	const entries = getEntriesForBook(child, subjectId);
 	activeCopy = { child, subjectId };
-	els.copyMeta.textContent = `${child} · ${subject.name}`;
+	els.copyMeta.textContent = `${getChildName(child)} · ${subject.name}`;
 	els.copyTitle.textContent = subject.book;
-	els.copyTargetChild.innerHTML = children
-		.filter((item) => item !== child)
-		.map((item) => `<option value="${item}">${item}</option>`)
+	els.copyTargetChild.innerHTML = state.childAccounts
+		.filter((item) => getChildKey(item) !== child)
+		.map((item) => `<option value="${escapeHtml(getChildKey(item))}">${escapeHtml(getChildOptionLabel(item))}</option>`)
 		.join("");
 	els.copyStartDate.value = formatDate(new Date());
 	els.copyHelp.textContent = entries.length > 0 ? `기록 ${entries.length}개를 날짜순으로 복사합니다. 첫 기록은 시작일에, 다음 기록은 다음 날에 배치됩니다.` : "등록된 학습 기록이 없어서 교재만 복사됩니다.";
@@ -2627,6 +3298,11 @@ function openCopyDialog(child, subjectId) {
 function copyBook(event) {
 	if (event.submitter?.value === "cancel" || !activeCopy) return;
 	event.preventDefault();
+	if (isServiceExpired()) {
+		els.copyDialog.close();
+		showTeacherToast(getServiceExpiredMessage(), true);
+		return;
+	}
 
 	const targetChild = els.copyTargetChild.value;
 	const startDate = els.copyStartDate.value;
@@ -2655,7 +3331,8 @@ function copyBook(event) {
 		const copiedDate = formatDate(addDays(parseDate(startDate), index));
 		const key = entryKey(targetChild, copiedSubject.id, copiedDate);
 		state.entries[key] = {
-			child: targetChild,
+			childId: targetChild,
+			child: getChildName(targetChild),
 			subjectId: copiedSubject.id,
 			date: copiedDate,
 			key,
@@ -2668,7 +3345,8 @@ function copyBook(event) {
 			rewardRedeemed: false,
 			minimumStudyMinutes: normalizeMinimumStudyMinutes(entry.minimumStudyMinutes ?? copiedSubject.minimumStudyMinutes),
 			copiedFrom: {
-				child: activeCopy.child,
+				childId: activeCopy.child,
+				child: getChildName(activeCopy.child),
 				subjectId: activeCopy.subjectId,
 				date: entry.date,
 			},
@@ -2685,6 +3363,11 @@ function copyBook(event) {
 function addSubject(event) {
 	if (event.submitter?.value === "cancel") return;
 	event.preventDefault();
+	if (isServiceExpired()) {
+		els.subjectDialog.close();
+		showTeacherToast(getServiceExpiredMessage(), true);
+		return;
+	}
 	const child = els.subjectChild.value;
 	const subjectSetting = getSubjectSettingById(els.subjectName.value);
 	const book = els.bookName.value.trim();
@@ -2761,7 +3444,8 @@ function createAutoPlanEntries(child, subject) {
 			const key = entryKey(child, subject.id, date);
 			if (!state.entries[key]) {
 				state.entries[key] = {
-					child,
+					childId: child,
+					child: getChildName(child),
 					subjectId: subject.id,
 					date,
 					key,
@@ -2787,7 +3471,7 @@ function createAutoPlanEntries(child, subject) {
 function deleteBlankPlanEntries(child, subjectId) {
 	Object.keys(state.entries).forEach((key) => {
 		const entry = state.entries[key];
-		if (entry.child === child && entry.subjectId === subjectId && !entry.completed && !entry.amount && !entry.memo && !entry.rewardAwarded) {
+		if (getEntryChildKey(entry) === child && entry.subjectId === subjectId && !entry.completed && !entry.amount && !entry.memo && !entry.rewardAwarded) {
 			delete state.entries[key];
 		}
 	});
@@ -2825,7 +3509,11 @@ function getAllSubjects() {
 }
 
 function getSubjectForEntry(entry) {
-	return getSubjectsForChild(entry.child).find((subject) => subject.id === entry.subjectId);
+	return getSubjectsForChild(getEntryChildKey(entry)).find((subject) => subject.id === entry.subjectId);
+}
+
+function getEntryChildKey(entry) {
+	return getChildKey(entry?.childId || entry?.child || "");
 }
 
 function isSubjectActiveInRange(subject, rangeStart, rangeEnd) {
@@ -2855,7 +3543,7 @@ function getEntryDateValidationMessage(subject, date) {
 
 function getEntriesForBook(child, subjectId) {
 	return Object.values(state.entries)
-		.filter((entry) => entry.child === child && entry.subjectId === subjectId)
+		.filter((entry) => getEntryChildKey(entry) === child && entry.subjectId === subjectId)
 		.sort((a, b) => a.date.localeCompare(b.date));
 }
 
@@ -2867,7 +3555,7 @@ function findMoveConflict(entriesToMove, dayOffset) {
 	const movingKeys = new Set(entriesToMove.map((entry) => entry.key));
 	return entriesToMove.find((entry) => {
 		const targetDate = formatDate(addDays(parseDate(entry.date), dayOffset));
-		const targetKey = entryKey(entry.child, entry.subjectId, targetDate);
+		const targetKey = entryKey(getEntryChildKey(entry), entry.subjectId, targetDate);
 		return state.entries[targetKey] && !movingKeys.has(targetKey);
 	});
 }
@@ -3010,6 +3698,529 @@ function formatShortDate(value) {
 	return `${Number(match[2])}.${Number(match[3])}`;
 }
 
+function formatServiceDate(value) {
+	if (!value) return "";
+	const text = String(value);
+	const dateText = text.includes("T") ? text.slice(0, 10) : text;
+	const match = dateText.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+	if (!match) return text;
+	return `${match[1]}.${match[2]}.${match[3]}`;
+}
+
+function isServiceExpired(profile = state.profile) {
+	const plan = profile?.plan || {};
+	const price = Number(plan.monthlyPrice || 0);
+	if (price <= 0) return false;
+	const endsAt = profile?.servicePeriod?.endsAt;
+	if (!endsAt) return false;
+	const expiresAt = new Date(endsAt);
+	if (Number.isNaN(expiresAt.getTime())) return false;
+	const restrictionStartsAt = new Date(expiresAt);
+	restrictionStartsAt.setDate(restrictionStartsAt.getDate() + 1);
+	restrictionStartsAt.setHours(0, 0, 0, 0);
+	return restrictionStartsAt.getTime() <= Date.now();
+}
+
+function getServiceExpiredMessage() {
+	return "이용기간이 만료되어 사용할 수 없습니다.";
+}
+
+function formatProfilePlanSummary(profile) {
+	return getProfilePlanDetails(profile).summary;
+}
+
+function getProfilePlanDetails(profile) {
+	const plan = profile?.plan || {};
+	const period = profile?.servicePeriod || {};
+	const planName = plan.name || "베이직";
+	const studentLimit = Number(plan.studentLimit || 0);
+	const price = Number(plan.monthlyPrice || 0);
+	const priceText = price ? `${price.toLocaleString("ko-KR")}원/월` : "무료";
+	const limitText = studentLimit ? `${studentLimit}명` : "제한 없음";
+	const startText = formatServiceDate(period.startedAt);
+	const endText = formatServiceDate(period.endsAt);
+	const isPaid = price > 0;
+	const periodText = !isPaid ? "기간 제한 없음" : startText && endText ? `${startText} ~ ${endText}` : startText ? `${startText}부터` : "기간 미설정";
+	const expired = isServiceExpired(profile);
+	return {
+		name: planName,
+		priceText,
+		limitText,
+		periodText,
+		isExpired: expired,
+		isPaid,
+		summary: `${planName} · ${priceText} · 학생 ${limitText} · ${periodText}${expired ? " · 만료됨" : ""}`,
+	};
+}
+
+function getStudentLimit() {
+	return Number(state?.profile?.plan?.studentLimit || 0);
+}
+
+function canAddChildAccount() {
+	const limit = getStudentLimit();
+	if (isServiceExpired()) return false;
+	return limit <= 0 || state.childAccounts.length < limit;
+}
+
+function getStudentLimitMessage() {
+	const details = getProfilePlanDetails(state.profile);
+	if (details.isExpired) return "이용기간이 만료되어 학생을 추가할 수 없습니다.";
+	return `현재 ${details.name} 플랜은 학생 ${getStudentLimit()}명까지 등록할 수 있습니다.`;
+}
+
+function setPlanChangeMessage(text = "", isError = false) {
+	if (!els.planChangeMessage) return;
+	els.planChangeMessage.textContent = text;
+	els.planChangeMessage.classList.toggle("is-error", Boolean(isError));
+}
+
+function getPlanPriceText(plan) {
+	const price = Number(plan?.monthlyPrice || 0);
+	return price ? `${price.toLocaleString("ko-KR")}원/월` : "무료";
+}
+
+function getPlanTermAmount(plan, term) {
+	const months = Number(term?.months || 1);
+	const baseAmount = Number(plan?.monthlyPrice || 0) * months;
+	const discountRate = Number(term?.discountRate || 0);
+	const discountAmount = Math.round((baseAmount * discountRate) / 100);
+	return {
+		months,
+		baseAmount,
+		discountRate,
+		discountAmount,
+		amount: Math.max(0, baseAmount - discountAmount),
+	};
+}
+
+function getPlanTermText(plan, term) {
+	const summary = getPlanTermAmount(plan, term);
+	const discountText = summary.discountRate > 0
+		? ` · ${summary.discountRate.toLocaleString("ko-KR")}% 할인`
+		: "";
+	return `${summary.months}개월 · ${summary.amount.toLocaleString("ko-KR")}원${discountText}`;
+}
+
+function getPlanLimitText(plan) {
+	const limit = Number(plan?.studentLimit || 0);
+	return limit ? `학생 ${limit}명` : "학생 제한 없음";
+}
+
+async function ensureAvailablePlans() {
+	if (availablePlans.length) return availablePlans;
+	const data = await requestTeacherJson("/api/auth/plans");
+	availablePlans = Array.isArray(data.plans) ? data.plans : [];
+	return availablePlans;
+}
+
+function renderPlanOptions() {
+	if (!els.planOptions) return;
+	const currentPlanCode = state.profile?.plan?.code || "basic";
+	const childCount = state.childAccounts.length;
+	els.planOptions.innerHTML = availablePlans
+		.map((plan) => {
+			const limit = Number(plan.studentLimit || 0);
+			const disabled = limit > 0 && childCount > limit;
+			const checked = plan.code === currentPlanCode;
+			const statusText = checked ? "현재 이용 중" : disabled ? `현재 학생 ${childCount}명으로 변경 불가` : "변경 가능";
+			const gradientFrom = normalizePlanColor(plan.gradientFrom, Number(plan.monthlyPrice || 0) > 0 ? "#426f96" : "#64748b");
+			const gradientTo = normalizePlanColor(plan.gradientTo, Number(plan.monthlyPrice || 0) > 0 ? "#2ba889" : "#94a3b8");
+			return `
+        <label class="plan-option ${checked ? "is-current" : ""} ${disabled ? "is-disabled" : ""}" style="--option-gradient-from: ${escapeHtml(gradientFrom)}; --option-gradient-to: ${escapeHtml(gradientTo)};">
+          <input type="radio" name="planCode" value="${escapeHtml(plan.code)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""} />
+          <span>
+            <strong>${escapeHtml(plan.name)}</strong>
+            <small>${escapeHtml(getPlanPriceText(plan))} · ${escapeHtml(getPlanLimitText(plan))}</small>
+          </span>
+          <em>${escapeHtml(statusText)}</em>
+        </label>
+      `;
+		})
+		.join("");
+}
+
+async function openPlanDialog() {
+	try {
+		setPlanChangeMessage("요금제 정보를 불러오는 중입니다.");
+		els.planDialog.showModal();
+		await ensureAvailablePlans();
+		renderPlanOptions();
+		setPlanChangeMessage("");
+	} catch (error) {
+		setPlanChangeMessage(error.message, true);
+	}
+}
+
+function closePlanDialog() {
+	els.planDialog.close();
+	setPlanChangeMessage("");
+}
+
+function updateTeacherProfile(user) {
+	state.profile = normalizeProfile(user);
+	localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+	localStorage.setItem(`${AUTH_USER_KEY_PREFIX}teacher`, JSON.stringify(user));
+	renderProfile();
+	renderMyPage();
+}
+
+async function savePlanChange(event) {
+	event.preventDefault();
+	const formData = new FormData(els.planForm);
+	const planCode = String(formData.get("planCode") || "").trim();
+	const selectedPlan = availablePlans.find((plan) => plan.code === planCode);
+	if (!planCode) {
+		setPlanChangeMessage("변경할 요금제를 선택하세요.", true);
+		return;
+	}
+	if (!selectedPlan) {
+		setPlanChangeMessage("선택한 요금제를 확인하지 못했습니다.", true);
+		return;
+	}
+	if (planCode === (state.profile?.plan?.code || "basic")) {
+		closePlanDialog();
+		return;
+	}
+
+	try {
+		els.savePlanChange.disabled = true;
+		if (Number(selectedPlan.monthlyPrice || 0) > 0) {
+			closePlanDialog();
+			await requestPlanPayment(planCode);
+			return;
+		}
+
+		setPlanChangeMessage("요금제를 변경하는 중입니다.");
+		const data = await requestTeacherJson("/api/auth/plan", {
+			method: "PUT",
+			body: JSON.stringify({ planCode }),
+		});
+		updateTeacherProfile(data.user);
+		closePlanDialog();
+	} catch (error) {
+		if (els.planDialog.open) setPlanChangeMessage(error.message, true);
+		else alert(error.message || "결제창을 준비하지 못했습니다.");
+	} finally {
+		els.savePlanChange.disabled = false;
+	}
+}
+
+async function requestPlanPayment(planCode) {
+	setPlanChangeMessage("결제창을 준비하는 중입니다.");
+	const plans = await ensureAvailablePlans();
+	const plan = plans.find((item) => item.code === planCode);
+	const term = await selectPaymentTerm(planCode);
+	const url = new URL(window.location.href);
+	url.search = "";
+	url.hash = "";
+	const successUrl = new URL(url.href);
+	successUrl.searchParams.set("payment", "success");
+	const failUrl = new URL(url.href);
+	failUrl.searchParams.set("payment", "fail");
+	const data = await requestTeacherJson("/api/auth/payments/orders", {
+		method: "POST",
+		body: JSON.stringify({ planCode, termMonths: term.months, returnUrl: successUrl.href }),
+	});
+	if (plan && data.order) {
+		data.order.planName = plan.name;
+	}
+	if (data.provider === "innopay") {
+		const payMethod = await selectInnopayPayMethod();
+		data.innopay = { ...(data.innopay || {}), payMethod };
+		await requestInnopayPlanPayment(data, successUrl.href);
+		return;
+	}
+	await requestTossPlanPayment(data, successUrl.href, failUrl.href);
+}
+
+function selectPaymentTerm(planCode) {
+	const plan = availablePlans.find((item) => item.code === planCode);
+	const terms = Array.isArray(plan?.terms) && plan.terms.length
+		? plan.terms
+		: [{ months: 1, discountRate: 0, sortOrder: 1 }];
+	if (!els.paymentTermDialog || terms.length <= 1) {
+		return Promise.resolve(terms[0]);
+	}
+
+	return new Promise((resolve, reject) => {
+		let settled = false;
+		let selectedMonths = Number(terms[0].months || 1);
+		const dialog = els.paymentTermDialog;
+
+		const render = () => {
+			if (!els.paymentTermOptions) return;
+			els.paymentTermOptions.innerHTML = terms.map((term) => {
+				const summary = getPlanTermAmount(plan, term);
+				const selected = summary.months === selectedMonths;
+				const discountText = summary.discountRate > 0
+					? `<small class="payment-term-discount">${summary.discountRate.toLocaleString("ko-KR")}% 할인</small>`
+					: "";
+				const baseText = summary.discountAmount > 0
+					? `정가 ${summary.baseAmount.toLocaleString("ko-KR")}원 · 할인 ${summary.discountAmount.toLocaleString("ko-KR")}원`
+					: `${summary.months}개월 이용권`;
+				return `
+					<button class="plan-option payment-term-option ${selected ? "is-selected" : ""}" type="button" data-payment-term="${summary.months}">
+						<span>
+							<strong>${summary.months}개월</strong>
+							<small>${escapeHtml(baseText)}</small>
+						</span>
+						<em>
+							${discountText}
+							<strong>${summary.amount.toLocaleString("ko-KR")}원</strong>
+						</em>
+					</button>
+				`;
+			}).join("");
+			if (els.paymentTermMessage) {
+				els.paymentTermMessage.textContent = "";
+			}
+		};
+
+		const cleanup = () => {
+			dialog.removeEventListener("click", handleClick);
+			els.paymentTermForm?.removeEventListener("submit", handleSubmit);
+			els.closePaymentTermDialog?.removeEventListener("click", handleCancel);
+			els.cancelPaymentTermDialog?.removeEventListener("click", handleCancel);
+			dialog.removeEventListener("cancel", handleCancel);
+			dialog.removeEventListener("close", handleClose);
+		};
+		const finish = () => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			if (dialog.open) dialog.close();
+			resolve(terms.find((term) => Number(term.months || 1) === selectedMonths) || terms[0]);
+		};
+		const cancel = () => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			if (dialog.open) dialog.close();
+			reject(new Error("결제가 취소되었습니다."));
+		};
+		const handleClick = (event) => {
+			const button = event.target.closest("[data-payment-term]");
+			if (!button) return;
+			selectedMonths = Number(button.dataset.paymentTerm || selectedMonths);
+			render();
+		};
+		const handleSubmit = (event) => {
+			event.preventDefault();
+			finish();
+		};
+		const handleCancel = (event) => {
+			event.preventDefault();
+			cancel();
+		};
+		const handleClose = () => {
+			if (!settled) cancel();
+		};
+
+		render();
+		dialog.addEventListener("click", handleClick);
+		els.paymentTermForm?.addEventListener("submit", handleSubmit);
+		els.closePaymentTermDialog?.addEventListener("click", handleCancel);
+		els.cancelPaymentTermDialog?.addEventListener("click", handleCancel);
+		dialog.addEventListener("cancel", handleCancel);
+		dialog.addEventListener("close", handleClose);
+		dialog.showModal();
+	});
+}
+
+function selectInnopayPayMethod() {
+	if (!els.innopayMethodDialog) return Promise.resolve("CARD");
+	return new Promise((resolve, reject) => {
+		let settled = false;
+		const dialog = els.innopayMethodDialog;
+
+		const cleanup = () => {
+			dialog.removeEventListener("click", handleClick);
+			els.closeInnopayMethodDialog?.removeEventListener("click", handleCancel);
+			dialog.removeEventListener("cancel", handleCancel);
+			dialog.removeEventListener("close", handleClose);
+		};
+		const finish = (method) => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			if (dialog.open) dialog.close();
+			resolve(method);
+		};
+		const cancel = () => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			if (dialog.open) dialog.close();
+			reject(new Error("결제가 취소되었습니다."));
+		};
+		const handleClick = (event) => {
+			const button = event.target.closest("[data-innopay-method]");
+			if (!button) return;
+			const method = String(button.dataset.innopayMethod || "").toUpperCase();
+			if (method === "CARD" || method === "EPAY") finish(method);
+		};
+		const handleCancel = (event) => {
+			event.preventDefault();
+			cancel();
+		};
+		const handleClose = () => {
+			if (!settled) cancel();
+		};
+
+		dialog.addEventListener("click", handleClick);
+		els.closeInnopayMethodDialog?.addEventListener("click", handleCancel);
+		dialog.addEventListener("cancel", handleCancel);
+		dialog.addEventListener("close", handleClose);
+		dialog.showModal();
+	});
+}
+
+async function extendCurrentPlan() {
+	const planCode = state.profile?.plan?.code || "";
+	if (!planCode || !getProfilePlanDetails(state.profile).isPaid) {
+		alert("연장할 유료 요금제가 없습니다.");
+		return;
+	}
+
+	try {
+		await requestPlanPayment(planCode);
+	} catch (error) {
+		alert(error.message || "결제창을 준비하지 못했습니다.");
+	}
+}
+
+async function requestTossPlanPayment(data, successUrl, failUrl) {
+	if (typeof window.TossPayments !== "function") {
+		throw new Error("토스페이먼츠 결제 SDK를 불러오지 못했습니다.");
+	}
+
+	const tossPayments = window.TossPayments(data.clientKey);
+	const payment = tossPayments.payment({ customerKey: data.customerKey });
+
+	await payment.requestPayment({
+		method: "CARD",
+		amount: {
+			currency: "KRW",
+			value: Number(data.order.amount || 0),
+		},
+		orderId: data.order.orderId,
+		orderName: data.order.orderName,
+		successUrl,
+		failUrl,
+	});
+}
+
+async function requestInnopayPlanPayment(data, returnUrl) {
+	const innopaySdk = await ensureInnopaySdk();
+	if (!innopaySdk?.goPay) {
+		throw new Error("이노페이 결제 SDK를 불러오지 못했습니다.");
+	}
+	const buyerTel = normalizePaymentPhone(data.innopay?.buyerTel || state.profile.phone || "");
+	if (!buyerTel) {
+		throw new Error("이노페이 결제를 위해 내 정보의 휴대폰 번호가 필요합니다.");
+	}
+	const innopayUserId = normalizeInnopayUserId(data.customerKey || state.profile.email || "");
+
+	innopaySdk.goPay({
+		payMethod: data.innopay?.payMethod || "CARD",
+		mid: data.innopay?.mid || "",
+		moid: data.order.orderId,
+		goodsName: data.order.orderName,
+		goodsCnt: "1",
+		amt: String(data.order.amount),
+		taxFreeAmt: "0",
+		buyerName: data.innopay?.buyerName || state.profile.name || "StudyFlow",
+		buyerTel,
+		buyerEmail: data.innopay?.buyerEmail || state.profile.email || "",
+		returnUrl,
+		currency: "KRW",
+		mallReserved: data.order.planCode,
+		offeringPeriod: "",
+		mallIp: "",
+		mallUserId: innopayUserId,
+		userIp: "",
+		userId: innopayUserId,
+		vBankExpDate: "",
+		appScheme: "",
+		logoUrl: ""
+	});
+}
+
+function getInnopaySdk() {
+	if (typeof innopay !== "undefined") return innopay;
+	return window.innopay;
+}
+
+function ensureInnopaySdk() {
+	const loadedSdk = getInnopaySdk();
+	if (loadedSdk?.goPay) return Promise.resolve(loadedSdk);
+	const existingScript = document.querySelector("script[data-innopay-sdk], script[src='https://pg.innopay.co.kr/tpay/js/v1/innopay.js']");
+	if (existingScript) {
+		return new Promise((resolve, reject) => {
+			existingScript.addEventListener("load", () => resolve(getInnopaySdk()), { once: true });
+			existingScript.addEventListener("error", () => reject(new Error("이노페이 결제 SDK를 불러오지 못했습니다.")), { once: true });
+			setTimeout(() => resolve(getInnopaySdk()), 1500);
+		});
+	}
+
+	return new Promise((resolve, reject) => {
+		const script = document.createElement("script");
+		script.src = "https://pg.innopay.co.kr/tpay/js/v1/innopay.js";
+		script.async = true;
+		script.dataset.innopaySdk = "true";
+		script.onload = () => resolve(getInnopaySdk());
+		script.onerror = () => reject(new Error("이노페이 결제 SDK를 불러오지 못했습니다."));
+		document.head.appendChild(script);
+	});
+}
+
+async function processPaymentRedirect() {
+	const params = new URLSearchParams(window.location.search);
+	const paymentStatus = params.get("payment") || "";
+	if (!paymentStatus) return;
+	const provider = params.has("paymentToken") || params.has("tid") || params.has("moid") ? "innopay" : "toss";
+
+	const cleanUrl = new URL(window.location.href);
+	cleanUrl.search = "";
+	window.history.replaceState({}, "", cleanUrl.href);
+	showPage("mypage");
+
+	if (paymentStatus === "fail") {
+		alert(params.get("message") || "결제가 완료되지 않았습니다.");
+		return;
+	}
+
+	const paymentKey = params.get("paymentKey") || "";
+	const orderId = params.get("orderId") || params.get("moid") || "";
+	const amount = params.get("amount") || params.get("amt") || "";
+	if ((provider === "toss" && !paymentKey) || !orderId || !amount) {
+		alert("결제 승인 정보가 올바르지 않습니다.");
+		return;
+	}
+
+	try {
+		const data = await requestTeacherJson("/api/auth/payments/confirm", {
+			method: "POST",
+			body: JSON.stringify({
+				provider,
+				paymentKey,
+				orderId,
+				amount,
+				paymentToken: params.get("paymentToken") || "",
+				tid: params.get("tid") || "",
+				mid: params.get("mid") || "",
+				taxFreeAmt: params.get("taxFreeAmt") || "0",
+				moid: params.get("moid") || "",
+			}),
+		});
+		updateTeacherProfile(data.user);
+		alert("결제가 완료되어 요금제가 변경되었습니다.");
+	} catch (error) {
+		alert(error.message || "결제 승인 처리에 실패했습니다.");
+	}
+}
+
 function formatBookPeriod(subject) {
 	if (!subject.startDate && !subject.endDate) return "기간 미설정";
 	if (subject.startDate && subject.endDate) return `${formatShortDate(subject.startDate)} ~ ${formatShortDate(subject.endDate)}`;
@@ -3088,7 +4299,7 @@ function getRewardForCompletedEntry(subject, completed, previousEntry = {}) {
 function getRewardTotalsForChild(child) {
 	const totals = new Map();
 	Object.values(state.entries || {}).forEach((entry) => {
-		if (entry.child !== child || !entry.rewardAwarded || entry.rewardRedeemed) return;
+		if (getEntryChildKey(entry) !== child || !entry.rewardAwarded || entry.rewardRedeemed) return;
 		const amount = normalizeRewardAmount(entry.rewardAmount);
 		if (amount <= 0) return;
 		const label = normalizeRewardLabel(entry.rewardLabel);
@@ -3115,9 +4326,10 @@ function getRewardRedemptionBatches() {
 	Object.values(state.entries || {}).forEach((entry) => {
 		if (!entry.rewardAwarded || !entry.rewardRedeemed) return;
 		const redeemedAt = entry.rewardRedeemedAt || "unknown";
-		const key = `${entry.child}__${redeemedAt}`;
+		const childKey = getEntryChildKey(entry);
+		const key = `${childKey}__${redeemedAt}`;
 		const batch = batches.get(key) || {
-			child: entry.child,
+			child: childKey,
 			redeemedAt,
 			entries: [],
 		};
@@ -3171,7 +4383,7 @@ function formatStudyDurationSeconds(seconds) {
 
 function getRedeemableRewardEntriesForChild(child) {
 	return Object.values(state.entries || {})
-		.filter((entry) => entry.child === child && entry.rewardAwarded && !entry.rewardRedeemed)
+		.filter((entry) => getEntryChildKey(entry) === child && entry.rewardAwarded && !entry.rewardRedeemed)
 		.sort((a, b) => a.date.localeCompare(b.date));
 }
 
@@ -3181,7 +4393,7 @@ function resetRewardForChild(child) {
 	if (!totals.length) return;
 
 	activeRewardResetChild = child;
-	els.rewardResetMeta.textContent = child;
+	els.rewardResetMeta.textContent = getChildName(child);
 	els.rewardResetSummary.textContent = `${formatRewardTotal(totals)} 지급 대상 ${entries.length}건을 확인한 뒤 초기화합니다.`;
 	els.rewardResetList.innerHTML = entries
 		.map((entry) => {
@@ -3213,7 +4425,7 @@ function confirmRewardReset(event) {
 	const now = new Date().toISOString();
 
 	Object.values(state.entries || {}).forEach((entry) => {
-		if (entry.child === child && entry.rewardAwarded && !entry.rewardRedeemed) {
+		if (getEntryChildKey(entry) === child && entry.rewardAwarded && !entry.rewardRedeemed) {
 			entry.rewardRedeemed = true;
 			entry.rewardRedeemedAt = now;
 			entry.updatedAt = now;
@@ -3303,6 +4515,10 @@ if (els.weekSearch) {
 
 if (els.weekChildAdd) {
 	els.weekChildAdd.addEventListener("click", () => {
+		if (!canAddChildAccount()) {
+			alert(getStudentLimitMessage());
+			return;
+		}
 		window.location.href = "./child.html";
 	});
 }
@@ -3316,6 +4532,12 @@ els.navItems.forEach((item) => {
 	item.addEventListener("click", () => showPage(item.dataset.targetPage));
 });
 els.mypageContent.addEventListener("click", (event) => {
+	const photoOpenButton = event.target.closest("[data-profile-photo-open]");
+	if (photoOpenButton) {
+		openProfilePhotoDialog();
+		return;
+	}
+
 	const pushToggle = event.target.closest("[data-push-toggle]");
 	if (pushToggle) {
 		togglePushSubscription();
@@ -3328,11 +4550,59 @@ els.mypageContent.addEventListener("click", (event) => {
 		return;
 	}
 
+	const teacherCommentSave = event.target.closest("[data-teacher-comment-save]");
+	if (teacherCommentSave) {
+		saveTeacherComment();
+		return;
+	}
+
+	const planChangeButton = event.target.closest("[data-plan-change]");
+	if (planChangeButton) {
+		openPlanDialog();
+		return;
+	}
+
+	const planExtendButton = event.target.closest("[data-plan-extend]");
+	if (planExtendButton) {
+		extendCurrentPlan();
+		return;
+	}
+
 	const entryCard = event.target.closest("[data-target-page]");
 	if (entryCard) {
 		showPage(entryCard.dataset.targetPage);
 		return;
 	}
+});
+
+els.profilePhotoDialog?.addEventListener("click", (event) => {
+	const pickButton = event.target.closest("[data-profile-photo-pick]");
+	if (pickButton) {
+		closeProfilePhotoDialog();
+		els.mypageContent.querySelector("[data-profile-photo-input]")?.click();
+		return;
+	}
+
+	const clearButton = event.target.closest("[data-profile-photo-clear]");
+	if (clearButton) {
+		if (clearButton.disabled) return;
+		closeProfilePhotoDialog();
+		resetProfilePhoto().catch((error) => {
+			alert(error.message || "프로필 사진을 초기화하지 못했습니다.");
+		});
+	}
+});
+
+els.closeProfilePhotoDialog?.addEventListener("click", closeProfilePhotoDialog);
+
+els.mypageContent.addEventListener("change", (event) => {
+	const input = event.target.closest("[data-profile-photo-input]");
+	if (!input) return;
+	const file = input.files?.[0];
+	input.value = "";
+	uploadProfilePhoto(file).catch((error) => {
+		alert(error.message || "프로필 사진을 저장하지 못했습니다.");
+	});
 });
 
 function handleSubjectClick(event) {
@@ -3355,7 +4625,6 @@ function handleSubjectClick(event) {
 els.subjectsSection.addEventListener("click", handleSubjectClick);
 
 els.settingsSection.addEventListener("click", (event) => {
-	if (window.StudyFlowAppLock?.handleSettingsClick(event, renderSettingsPage)) return;
 	const backButton = event.target.closest("[data-target-page]");
 	if (backButton) showPage(backButton.dataset.targetPage);
 });
@@ -3371,10 +4640,6 @@ els.accessLogsSection.addEventListener("click", (event) => {
 });
 
 els.settingsSection.addEventListener("change", (event) => {
-	if (window.StudyFlowAppLock?.handleSettingsChange(event)) {
-		renderSettingsPage();
-		return;
-	}
 	const weekStartModeInput = event.target.closest("[data-week-start-mode]");
 	if (weekStartModeInput?.checked) {
 		updateWeekStartMode(weekStartModeInput.value);
@@ -3458,9 +4723,19 @@ els.weeklyTable.addEventListener("click", (event) => {
 		return;
 	}
 
+	const childStatusButton = event.target.closest("[data-weekly-child-status]");
+	if (childStatusButton) {
+		updateChildStatus(childStatusButton.dataset.weeklyChildStatus, childStatusButton.dataset.nextStatus);
+		return;
+	}
+
 	const bookDialogButton = event.target.closest("[data-weekly-open-book-dialog]");
 	if (bookDialogButton) {
-		window.location.href = `./book.html?child=${encodeURIComponent(bookDialogButton.dataset.weeklyOpenBookDialog || "")}`;
+		if (isServiceExpired()) {
+			showTeacherToast(getServiceExpiredMessage(), true);
+			return;
+		}
+		window.location.href = `./book.html?childId=${encodeURIComponent(bookDialogButton.dataset.weeklyOpenBookDialog || "")}`;
 		return;
 	}
 
@@ -3476,13 +4751,17 @@ els.weeklyTable.addEventListener("click", (event) => {
 	const editButton = event.target.closest(".edit-book");
 	if (editButton) {
 		closeBookMenus();
-		window.location.href = `./book.html?child=${encodeURIComponent(editButton.dataset.child || "")}&subjectId=${encodeURIComponent(editButton.dataset.subjectId || "")}`;
+		window.location.href = `./book.html?childId=${encodeURIComponent(editButton.dataset.child || "")}&subjectId=${encodeURIComponent(editButton.dataset.subjectId || "")}`;
 		return;
 	}
 
 	const copyButton = event.target.closest(".copy-book");
 	if (copyButton) {
 		closeBookMenus();
+		if (isServiceExpired()) {
+			showTeacherToast(getServiceExpiredMessage(), true);
+			return;
+		}
 		openCopyDialog(copyButton.dataset.child, copyButton.dataset.subjectId);
 		return;
 	}
@@ -3495,7 +4774,7 @@ els.weeklyTable.addEventListener("click", (event) => {
 	}
 
 	const button = event.target.closest(".entry-cell");
-	if (button) openEntryDialog(button);
+	if (button) openEntryPage(button);
 });
 window.addEventListener("resize", closeBookMenus);
 window.addEventListener("scroll", closeBookMenus, true);
@@ -3509,12 +4788,29 @@ els.pendingSubjectSetting.addEventListener("change", renderPendingPlans);
 els.pendingRange.addEventListener("change", renderPendingPlans);
 els.pendingList.addEventListener("click", (event) => {
 	const button = event.target.closest(".pending-open-entry");
-	if (button) openEntryDialog(button);
+	if (button) openEntryPage(button);
 });
 els.rewardResetForm.addEventListener("submit", confirmRewardReset);
+els.planForm.addEventListener("submit", savePlanChange);
+els.closePlanDialog.addEventListener("click", closePlanDialog);
+els.cancelPlanDialog.addEventListener("click", closePlanDialog);
 els.deleteEntry.addEventListener("click", deleteEntry);
 els.closeEntryDialog.addEventListener("click", closeEntryDialog);
 els.cancelEntryDialog.addEventListener("click", closeEntryDialog);
+els.entryAnalyzeButton.addEventListener("click", analyzeActiveEntryAttachments);
+els.entryAttachmentList.addEventListener("click", (event) => {
+	const button = event.target.closest("[data-open-entry-attachment]");
+	if (!button) return;
+	const items = Array.from(els.entryAttachmentList.querySelectorAll("[data-open-entry-attachment]"))
+		.map((item) => ({
+			id: item.dataset.openEntryAttachment || "",
+			name: item.dataset.attachmentName || "첨부 사진",
+			url: item.dataset.attachmentUrl || "",
+		}))
+		.filter((item) => item.url);
+	const index = Math.max(0, items.findIndex((item) => item.id === button.dataset.openEntryAttachment));
+	openAttachmentGallery(items, index);
+});
 els.pushPlan.addEventListener("click", pushPlanFromActiveEntry);
 els.pullPlan.addEventListener("click", pullPlanFromActiveEntry);
 els.entryForm.addEventListener("submit", (event) => {
@@ -3555,19 +4851,11 @@ els.printTimetable.addEventListener("click", () => window.print());
 if (els.logoutButton) els.logoutButton.addEventListener("click", logout);
 
 render();
-showPage(getSavedPage("weekly"));
+showPage(getRequestedPage() || getSavedPage("weekly"));
 setupNativeBackButton();
 setupNativeAccessLogEvents();
-window.StudyFlowAppLock?.init({
-	role: "teacher",
-	accountId: authUser.id || authUser.email || "anonymous",
-	accountName: authUser.name || authUser.email || "StudyFlow",
-	isNativeApp,
-	onLogout: logout,
-});
-renderSettingsPage();
 recordStartupAccessLog().finally(() => loadAccessLogs());
-loadRemoteState();
+loadRemoteState().then(processPaymentRedirect);
 refreshPushState();
 registerNativePushIfAvailable();
 

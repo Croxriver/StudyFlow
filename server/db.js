@@ -46,13 +46,32 @@ function parseServerAddress(value) {
 
 async function getPool() {
   if (!poolPromise) {
-    poolPromise = sql.connect(getSqlConfig());
+    poolPromise = sql.connect(getSqlConfig())
+      .then((pool) => {
+        pool.on("error", () => {
+          poolPromise = null;
+        });
+        return pool;
+      })
+      .catch((error) => {
+        poolPromise = null;
+        throw error;
+      });
   }
 
   return poolPromise;
 }
 
+async function resetPool() {
+  const currentPool = await poolPromise.catch(() => null);
+  poolPromise = null;
+  if (currentPool) {
+    await currentPool.close().catch(() => {});
+  }
+}
+
 module.exports = {
   sql,
-  getPool
+  getPool,
+  resetPool
 };
