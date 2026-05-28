@@ -70,7 +70,7 @@ function getProfilePhotoExtension(mimeType) {
 function getProfileImageUrl(profileImagePath) {
   const value = String(profileImagePath || "").trim().replaceAll("\\", "/");
   if (!value) return "";
-  return `/uploads/profile-images/${value.split("/").map(encodeURIComponent).join("/")}`;
+  return `/api/uploads/profile-images/${value.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 function getProfileImageRelativePath(file) {

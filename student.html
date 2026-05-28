@@ -195,6 +195,23 @@
     <input id="studentAttachmentPicker" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden>
     <div class="profile-toast student-toast" id="studentToast" role="status" aria-live="polite"></div>
 
+    <dialog id="appMessageDialog" class="app-message-dialog">
+      <form method="dialog" id="appMessageForm">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow" id="appMessageMeta">StudyFlow</p>
+            <h3 id="appMessageTitle">안내</h3>
+          </div>
+          <button class="icon-btn" type="button" id="closeAppMessageDialog" aria-label="닫기">×</button>
+        </div>
+        <p class="app-message-text" id="appMessageText"></p>
+        <div class="dialog-actions">
+          <button class="ghost" type="button" id="cancelAppMessageDialog">취소</button>
+          <button type="submit" id="confirmAppMessageDialog">확인</button>
+        </div>
+      </form>
+    </dialog>
+
     <nav class="bottom-nav" aria-label="학생 화면 이동">
       <button class="nav-item active" type="button" data-target-page="today">오늘 학습</button>
       <button class="nav-item" type="button" data-target-page="week">주간 학습</button>

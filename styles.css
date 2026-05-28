@@ -3357,8 +3357,8 @@ button.mypage-avatar-large {
 	border-bottom: 1px solid var(--line);
 	border-top: 1px solid var(--line);
 	display: grid;
-	margin-left: -24px;
-	margin-right: -24px;
+	margin-left: calc(50% - 50vw);
+	margin-right: calc(50% - 50vw);
 }
 
 .mypage-push-section {
@@ -3379,7 +3379,7 @@ button.mypage-avatar-large {
 	grid-template-columns: 36px minmax(0, 1fr) auto auto;
 	justify-content: initial;
 	min-height: 74px;
-	padding: 14px 24px;
+	padding: 14px max(24px, calc((100vw - 1440px) / 2 + 24px));
 	text-align: left;
 	width: 100%;
 }
@@ -3681,6 +3681,20 @@ button.mypage-avatar-large {
 	font-weight: 400;
 	line-height: 1;
 	padding: 5px 8px;
+}
+
+.app-message-dialog {
+	max-width: min(420px, calc(100vw - 32px));
+	width: 420px;
+}
+
+.app-message-text {
+	color: var(--ink);
+	font-size: 15px;
+	font-weight: 600;
+	line-height: 1.6;
+	margin: 0;
+	white-space: pre-wrap;
 }
 
 .pay-method-option {

@@ -40,7 +40,7 @@ function toIsoText(value) {
 function getProfileImageUrl(profileImagePath) {
   const value = String(profileImagePath || "").trim().replaceAll("\\", "/");
   if (!value) return "";
-  return `/uploads/profile-images/${value.split("/").map(encodeURIComponent).join("/")}`;
+  return `/api/uploads/profile-images/${value.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 function entryKey(subjectId, date) {

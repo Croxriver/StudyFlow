@@ -29,31 +29,8 @@ const skipNames = new Set([
   "server-5191-error.log"
 ]);
 
-const webEntries = [
+const webDirectories = [
   "assets",
-  "index.html",
-  "login.html",
-  "signup.html",
-  "student.html",
-  "profile.html",
-  "book.html",
-  "child.html",
-  "entry.html",
-  "offline.html",
-  "styles.css",
-  "theme.js",
-  "auth.js",
-  "app.js",
-  "student.js",
-  "profile.js",
-  "book.js",
-  "child.js",
-  "entry.js",
-  "pwa-register.js",
-  "push-client.js",
-  "service-worker.js",
-  "manifest.webmanifest",
-  "web.config"
 ];
 
 const apiEntries = [
@@ -62,8 +39,17 @@ const apiEntries = [
   "scripts",
   "package.json",
   "package-lock.json",
-  ".env.example"
+  ".env.example",
+  ".enc.example"
 ];
+
+const rootWebExtensions = new Set([
+  ".html",
+  ".css",
+  ".js",
+  ".webmanifest",
+  ".config"
+]);
 
 function shouldSkip(name) {
   return skipNames.has(name) || name.endsWith(".log") || name.endsWith(".zip");
@@ -102,10 +88,18 @@ function copyNamedEntries(entries, targetDir) {
   }
 }
 
+function getRootWebEntries() {
+  return fs.readdirSync(rootDir).filter((name) => {
+    const source = path.join(rootDir, name);
+    if (shouldSkip(name) || !fs.statSync(source).isFile()) return false;
+    return rootWebExtensions.has(path.extname(name).toLowerCase());
+  });
+}
+
 fs.rmSync(outDir, { recursive: true, force: true });
 fs.mkdirSync(outDir, { recursive: true });
 
-copyNamedEntries(webEntries, webOutDir);
+copyNamedEntries([...webDirectories, ...getRootWebEntries()], webOutDir);
 copyNamedEntries(apiEntries, apiOutDir);
 
 fs.writeFileSync(

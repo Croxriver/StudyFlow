@@ -74,6 +74,13 @@ const els = {
 	studySessionCancel: document.querySelector("#studySessionCancel"),
 	studentAttachmentPicker: document.querySelector("#studentAttachmentPicker"),
 	studentToast: document.querySelector("#studentToast"),
+	appMessageDialog: document.querySelector("#appMessageDialog"),
+	appMessageForm: document.querySelector("#appMessageForm"),
+	appMessageTitle: document.querySelector("#appMessageTitle"),
+	appMessageText: document.querySelector("#appMessageText"),
+	closeAppMessageDialog: document.querySelector("#closeAppMessageDialog"),
+	cancelAppMessageDialog: document.querySelector("#cancelAppMessageDialog"),
+	confirmAppMessageDialog: document.querySelector("#confirmAppMessageDialog"),
 };
 
 const pageTitles = {
@@ -116,6 +123,63 @@ function parseStoredUser(value) {
 	} catch {
 		return {};
 	}
+}
+
+function openAppMessageDialog({ title = "안내", message = "", confirm = false, confirmText = "확인", cancelText = "취소" } = {}) {
+	if (!els.appMessageDialog) {
+		return Promise.resolve(confirm ? window["confirm"](message) : (window["alert"](message), true));
+	}
+
+	return new Promise((resolve) => {
+		let settled = false;
+		const dialog = els.appMessageDialog;
+		const cleanup = () => {
+			els.appMessageForm?.removeEventListener("submit", handleSubmit);
+			els.closeAppMessageDialog?.removeEventListener("click", handleCancel);
+			els.cancelAppMessageDialog?.removeEventListener("click", handleCancel);
+			dialog.removeEventListener("cancel", handleCancel);
+			dialog.removeEventListener("close", handleClose);
+		};
+		const finish = (value) => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			if (dialog.open) dialog.close();
+			resolve(value);
+		};
+		const handleSubmit = (event) => {
+			event.preventDefault();
+			finish(true);
+		};
+		const handleCancel = (event) => {
+			event.preventDefault();
+			finish(!confirm);
+		};
+		const handleClose = () => {
+			if (!settled) finish(!confirm);
+		};
+
+		els.appMessageTitle.textContent = title;
+		els.appMessageText.textContent = message;
+		els.confirmAppMessageDialog.textContent = confirmText;
+		els.cancelAppMessageDialog.textContent = cancelText;
+		els.cancelAppMessageDialog.hidden = !confirm;
+
+		els.appMessageForm?.addEventListener("submit", handleSubmit);
+		els.closeAppMessageDialog?.addEventListener("click", handleCancel);
+		els.cancelAppMessageDialog?.addEventListener("click", handleCancel);
+		dialog.addEventListener("cancel", handleCancel);
+		dialog.addEventListener("close", handleClose);
+		dialog.showModal();
+	});
+}
+
+function showAppAlert(message, options = {}) {
+	return openAppMessageDialog({ ...options, message, confirm: false });
+}
+
+function showAppConfirm(message, options = {}) {
+	return openAppMessageDialog({ ...options, message, confirm: true });
 }
 
 function setStatus(text, isError = false) {
@@ -1400,7 +1464,7 @@ async function completeStudy() {
 	const elapsed = endedAt.getTime() - activeStudy.startedAt.getTime();
 	const minimumMs = normalizeMinimumStudyMinutes(activeStudy.minimumStudyMinutes) * 60000;
 	if (minimumMs > 0 && elapsed < minimumMs) {
-		alert(`최소 학습 시간 ${formatMinimumStudyMinutes(activeStudy.minimumStudyMinutes)} 이후 완료할 수 있습니다.`);
+		await showAppAlert(`최소 학습 시간 ${formatMinimumStudyMinutes(activeStudy.minimumStudyMinutes)} 이후 완료할 수 있습니다.`);
 		return;
 	}
 	try {
@@ -1513,10 +1577,10 @@ document.addEventListener("click", (event) => {
 	openAttachmentGallery(items, index);
 });
 
-document.addEventListener("click", (event) => {
+document.addEventListener("click", async (event) => {
 	const button = event.target.closest("[data-delete-study-attachment]");
 	if (!button) return;
-	if (!window.confirm("등록한 사진을 삭제할까요?")) return;
+	if (!(await showAppConfirm("등록한 사진을 삭제할까요?", { title: "사진 삭제" }))) return;
 	const study = {
 		subjectId: button.dataset.subjectId,
 		date: button.dataset.date,

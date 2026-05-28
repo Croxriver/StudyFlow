@@ -702,6 +702,23 @@
 			</div>
 		</dialog>
 
+		<dialog id="appMessageDialog" class="app-message-dialog">
+			<form method="dialog" id="appMessageForm">
+				<div class="dialog-head">
+					<div>
+						<p class="eyebrow" id="appMessageMeta">StudyFlow</p>
+						<h3 id="appMessageTitle">안내</h3>
+					</div>
+					<button class="icon-btn" type="button" id="closeAppMessageDialog" aria-label="닫기">×</button>
+				</div>
+				<p class="app-message-text" id="appMessageText"></p>
+				<div class="dialog-actions">
+					<button class="ghost" type="button" id="cancelAppMessageDialog">취소</button>
+					<button type="submit" id="confirmAppMessageDialog">확인</button>
+				</div>
+			</form>
+		</dialog>
+
 		<script src="https://js.tosspayments.com/v2/standard"></script>
 		<script data-innopay-sdk src="https://pg.innopay.co.kr/tpay/js/v1/innopay.js"></script>
 		<script src="./push-client.js"></script>

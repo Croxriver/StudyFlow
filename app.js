@@ -113,6 +113,64 @@ function parseStoredUser(value) {
 	}
 }
 
+function openAppMessageDialog({ title = "안내", message = "", confirm = false, confirmText = "확인", cancelText = "취소" } = {}) {
+	if (!els.appMessageDialog) {
+		return Promise.resolve(confirm ? window["confirm"](message) : (window["alert"](message), true));
+	}
+
+	return new Promise((resolve) => {
+		let settled = false;
+		const dialog = els.appMessageDialog;
+
+		const cleanup = () => {
+			els.appMessageForm?.removeEventListener("submit", handleSubmit);
+			els.closeAppMessageDialog?.removeEventListener("click", handleCancel);
+			els.cancelAppMessageDialog?.removeEventListener("click", handleCancel);
+			dialog.removeEventListener("cancel", handleCancel);
+			dialog.removeEventListener("close", handleClose);
+		};
+		const finish = (value) => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			if (dialog.open) dialog.close();
+			resolve(value);
+		};
+		const handleSubmit = (event) => {
+			event.preventDefault();
+			finish(true);
+		};
+		const handleCancel = (event) => {
+			event.preventDefault();
+			finish(!confirm);
+		};
+		const handleClose = () => {
+			if (!settled) finish(!confirm);
+		};
+
+		els.appMessageTitle.textContent = title;
+		els.appMessageText.textContent = message;
+		els.confirmAppMessageDialog.textContent = confirmText;
+		els.cancelAppMessageDialog.textContent = cancelText;
+		els.cancelAppMessageDialog.hidden = !confirm;
+
+		els.appMessageForm?.addEventListener("submit", handleSubmit);
+		els.closeAppMessageDialog?.addEventListener("click", handleCancel);
+		els.cancelAppMessageDialog?.addEventListener("click", handleCancel);
+		dialog.addEventListener("cancel", handleCancel);
+		dialog.addEventListener("close", handleClose);
+		dialog.showModal();
+	});
+}
+
+function showAppAlert(message, options = {}) {
+	return openAppMessageDialog({ ...options, message, confirm: false });
+}
+
+function showAppConfirm(message, options = {}) {
+	return openAppMessageDialog({ ...options, message, confirm: true });
+}
+
 function getAccountStorageKey() {
 	return `${LEGACY_STORAGE_KEY}:${authUser.id || authUser.email || "anonymous"}`;
 }
@@ -263,6 +321,13 @@ const els = {
 	closeInnopayMethodDialog: document.querySelector("#closeInnopayMethodDialog"),
 	profilePhotoDialog: document.querySelector("#profilePhotoDialog"),
 	closeProfilePhotoDialog: document.querySelector("#closeProfilePhotoDialog"),
+	appMessageDialog: document.querySelector("#appMessageDialog"),
+	appMessageForm: document.querySelector("#appMessageForm"),
+	appMessageTitle: document.querySelector("#appMessageTitle"),
+	appMessageText: document.querySelector("#appMessageText"),
+	closeAppMessageDialog: document.querySelector("#closeAppMessageDialog"),
+	cancelAppMessageDialog: document.querySelector("#cancelAppMessageDialog"),
+	confirmAppMessageDialog: document.querySelector("#confirmAppMessageDialog"),
 };
 
 function loadState() {
@@ -334,8 +399,10 @@ function normalizeUserSettings(settings = {}) {
 
 function normalizeProfile(profile) {
 	const monthlyPrice = Number(profile?.plan?.monthlyPrice ?? profile?.monthlyPrice ?? 0);
-	const gradientFrom = normalizePlanColor(profile?.plan?.gradientFrom || profile?.gradientFrom, monthlyPrice > 0 ? "#426f96" : "#64748b");
-	const gradientTo = normalizePlanColor(profile?.plan?.gradientTo || profile?.gradientTo, monthlyPrice > 0 ? "#2ba889" : "#94a3b8");
+	const planCode = profile?.plan?.code || profile?.planCode || "basic";
+	const fallbackGradient = getDefaultPlanGradient(planCode, monthlyPrice);
+	const gradientFrom = normalizePlanColor(profile?.plan?.gradientFrom || profile?.gradientFrom, fallbackGradient.from);
+	const gradientTo = normalizePlanColor(profile?.plan?.gradientTo || profile?.gradientTo, fallbackGradient.to);
 	return {
 		name: profile?.name || "학습 관리자",
 		email: profile?.email || "manager@example.com",
@@ -343,7 +410,7 @@ function normalizeProfile(profile) {
 		phone: profile?.phone || "",
 		marketingConsent: Boolean(profile?.marketingConsent),
 		plan: {
-			code: profile?.plan?.code || profile?.planCode || "basic",
+			code: planCode,
 			name: profile?.plan?.name || profile?.planName || "",
 			monthlyPrice,
 			studentLimit: Number(profile?.plan?.studentLimit ?? profile?.studentLimit ?? 0),
@@ -354,7 +421,7 @@ function normalizeProfile(profile) {
 			startedAt: monthlyPrice > 0 ? profile?.servicePeriod?.startedAt || profile?.serviceStartedAt || "" : "",
 			endsAt: monthlyPrice > 0 ? profile?.servicePeriod?.endsAt || profile?.serviceEndsAt || "" : "",
 		},
-		profileImageUrl: profile?.profileImageUrl || "",
+		profileImageUrl: normalizeProfileImageUrl(profile?.profileImageUrl),
 		teacherComment: String(profile?.teacherComment || "").slice(0, 200),
 	};
 }
@@ -534,6 +601,21 @@ function normalizeMobilePhone(value) {
 function normalizePlanColor(value, fallback) {
 	const text = String(value || "").trim();
 	return /^#[0-9a-fA-F]{6}$/.test(text) ? text : fallback;
+}
+
+function normalizeProfileImageUrl(value) {
+	const text = String(value || "").trim();
+	if (!text) return "";
+	if (text.startsWith("/uploads/profile-images/")) return `/api${text}`;
+	return text;
+}
+
+function getDefaultPlanGradient(planCode, monthlyPrice = 0) {
+	if (planCode === "premium") return { from: "#0f766e", to: "#2563eb" };
+	if (planCode === "pro") return { from: "#7c3aed", to: "#e11d48" };
+	if (planCode === "starter") return { from: "#426f96", to: "#2ba889" };
+	if (Number(monthlyPrice || 0) > 0) return { from: "#426f96", to: "#2ba889" };
+	return { from: "#64748b", to: "#94a3b8" };
 }
 
 function normalizePaymentPhone(value) {
@@ -739,11 +821,11 @@ function applyUpdatedProfile(user) {
 async function uploadProfilePhoto(file) {
 	if (!file) return;
 	if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-		alert("jpg, png, webp 형식의 이미지만 등록할 수 있습니다.");
+		await showAppAlert("jpg, png, webp 형식의 이미지만 등록할 수 있습니다.");
 		return;
 	}
 	if (file.size > 5 * 1024 * 1024) {
-		alert("프로필 사진은 5MB 이하로 등록하세요.");
+		await showAppAlert("프로필 사진은 5MB 이하로 등록하세요.");
 		return;
 	}
 
@@ -948,7 +1030,7 @@ async function handleInitialMigration() {
 	const hasLegacyData = hasMeaningfulStoredState(legacyStateBeforeRemoteLoad);
 
 	if (!alreadyHandled && hasAccountData) {
-		const shouldUpload = confirm("이 계정의 브라우저 캐시 데이터를 서버 DB로 옮길까요?");
+		const shouldUpload = await showAppConfirm("이 계정의 브라우저 캐시 데이터를 서버 DB로 옮길까요?");
 		localStorage.setItem(migrationKey, shouldUpload ? "uploaded-account-cache" : "skipped-account-cache");
 
 		if (shouldUpload) {
@@ -958,7 +1040,7 @@ async function handleInitialMigration() {
 	}
 
 	if (!localStorage.getItem(migrationKey) && hasLegacyData) {
-		const shouldUpload = confirm("이 브라우저에 저장된 기존 공용 학습 데이터를 이 계정의 서버 DB로 옮길까요?");
+		const shouldUpload = await showAppConfirm("이 브라우저에 저장된 기존 공용 학습 데이터를 이 계정의 서버 DB로 옮길까요?");
 		localStorage.setItem(migrationKey, shouldUpload ? "uploaded" : "skipped");
 
 		if (shouldUpload) {
@@ -1939,8 +2021,9 @@ function renderWeeklyTrend(entries) {
 
 function renderMyPage() {
 	const planDetails = getProfilePlanDetails(state.profile);
-	const planGradientFrom = normalizePlanColor(state.profile?.plan?.gradientFrom, planDetails.isPaid ? "#426f96" : "#64748b");
-	const planGradientTo = normalizePlanColor(state.profile?.plan?.gradientTo, planDetails.isPaid ? "#2ba889" : "#94a3b8");
+	const fallbackGradient = getDefaultPlanGradient(state.profile?.plan?.code, state.profile?.plan?.monthlyPrice);
+	const planGradientFrom = normalizePlanColor(state.profile?.plan?.gradientFrom, fallbackGradient.from);
+	const planGradientTo = normalizePlanColor(state.profile?.plan?.gradientTo, fallbackGradient.to);
 	const profileImageUrl = String(state.profile.profileImageUrl || "").trim();
 	const teacherComment = String(state.profile.teacherComment || "").trim();
 	const avatarMarkup = profileImageUrl
@@ -2308,11 +2391,11 @@ function openSubjectDialogForChild(child) {
 	focusDialogField(els.subjectChild);
 }
 
-function openChildAccountDialog(accountId = "", options = {}) {
+async function openChildAccountDialog(accountId = "", options = {}) {
 	const account = state.childAccounts.find((item) => item.id === accountId);
 	isForcingChildRegistration = Boolean(options.required && !account && state.childAccounts.length === 0);
 	if (!account && !isForcingChildRegistration && !canAddChildAccount()) {
-		alert(getStudentLimitMessage());
+		await showAppAlert(getStudentLimitMessage());
 		return;
 	}
 	activeChildEdit = account ? { id: account.id, originalName: account.name } : null;
@@ -2338,7 +2421,7 @@ function openChildAccountDialog(accountId = "", options = {}) {
 	focusDialogField(els.childAccountName);
 }
 
-function saveChildAccount(event) {
+async function saveChildAccount(event) {
 	if (event.submitter?.value === "cancel") {
 		if (isForcingChildRegistration) {
 			event.preventDefault();
@@ -2362,40 +2445,40 @@ function saveChildAccount(event) {
 
 	if (!name) return;
 	if (!activeChildEdit && !canAddChildAccount()) {
-		alert(getStudentLimitMessage());
+		await showAppAlert(getStudentLimitMessage());
 		return;
 	}
 	if (!isValidKoreanMobilePhone(phone)) {
-		alert("학생 휴대폰은 01n-nnnn-nnnn 형식으로 입력하세요.");
+		await showAppAlert("학생 휴대폰은 01n-nnnn-nnnn 형식으로 입력하세요.");
 		focusDialogField(els.childPhone);
 		return;
 	}
 	if (!isValidKoreanMobilePhone(parentPhone)) {
-		alert("학부모 휴대폰은 01n-nnnn-nnnn 형식으로 입력하세요.");
+		await showAppAlert("학부모 휴대폰은 01n-nnnn-nnnn 형식으로 입력하세요.");
 		focusDialogField(els.childParentPhone);
 		return;
 	}
 	if (loginId && state.childAccounts.some((account) => account.id !== editingId && account.loginId === loginId)) {
-		alert("이미 사용 중인 학생 아이디입니다.");
+		await showAppAlert("이미 사용 중인 학생 아이디입니다.");
 		return;
 	}
 	if (!existingLoginId && loginId && !password) {
-		alert("학생 아이디를 새로 설정하려면 비밀번호도 함께 입력하세요.");
+		await showAppAlert("학생 아이디를 새로 설정하려면 비밀번호도 함께 입력하세요.");
 		focusDialogField(els.childPassword);
 		return;
 	}
 	if (password || passwordConfirm) {
 		if (!loginId) {
-			alert("비밀번호를 설정하려면 학생 아이디를 먼저 입력하세요.");
+			await showAppAlert("비밀번호를 설정하려면 학생 아이디를 먼저 입력하세요.");
 			focusDialogField(els.childLoginId);
 			return;
 		}
 		if (!password || !passwordConfirm) {
-			alert("비밀번호와 비밀번호 확인을 모두 입력하세요.");
+			await showAppAlert("비밀번호와 비밀번호 확인을 모두 입력하세요.");
 			return;
 		}
 		if (password !== passwordConfirm) {
-			alert("비밀번호가 서로 일치하지 않습니다.");
+			await showAppAlert("비밀번호가 서로 일치하지 않습니다.");
 			return;
 		}
 	}
@@ -2437,33 +2520,33 @@ function saveChildAccount(event) {
 	render();
 }
 
-function verifyChildLoginId() {
+async function verifyChildLoginId() {
 	if (activeChildEdit) {
 		const account = state.childAccounts.find((item) => item.id === activeChildEdit.id);
 		if (account?.loginId) {
-			alert("이미 설정된 학생 아이디는 변경할 수 없습니다.");
+			await showAppAlert("이미 설정된 학생 아이디는 변경할 수 없습니다.");
 			return;
 		}
 	}
 	const loginId = els.childLoginId.value.trim();
 	const editingId = activeChildEdit?.id || "";
 	if (!loginId) {
-		alert("확인할 학생 아이디를 입력하세요.");
+		await showAppAlert("확인할 학생 아이디를 입력하세요.");
 		focusDialogField(els.childLoginId);
 		return;
 	}
 	const isDuplicate = state.childAccounts.some((account) => account.id !== editingId && account.loginId === loginId);
-	alert(isDuplicate ? "이미 사용 중인 학생 아이디입니다." : "사용할 수 있는 학생 아이디입니다.");
+	await showAppAlert(isDuplicate ? "이미 사용 중인 학생 아이디입니다." : "사용할 수 있는 학생 아이디입니다.");
 }
 
-function deleteChildAccount(accountId) {
+async function deleteChildAccount(accountId) {
 	const account = state.childAccounts.find((item) => item.id === accountId);
 	if (!account) return;
 	if (state.childAccounts.length <= 1) {
-		alert("최소 한 명의 학생은 남겨두어야 합니다.");
+		await showAppAlert("최소 한 명의 학생은 남겨두어야 합니다.");
 		return;
 	}
-	const confirmed = confirm(`${account.name} 학생 계정을 삭제할까요?\n이 학생의 교재와 학습 기록도 함께 삭제됩니다.`);
+	const confirmed = await showAppConfirm(`${account.name} 학생 계정을 삭제할까요?\n이 학생의 교재와 학습 기록도 함께 삭제됩니다.`, { title: "학생 삭제" });
 	if (!confirmed) return;
 
 	state.childAccounts = state.childAccounts.filter((item) => item.id !== accountId);
@@ -2500,7 +2583,7 @@ function openSubjectSettingDialog(subjectId = "") {
 	focusDialogField(els.subjectSettingName);
 }
 
-function saveSubjectSetting(event) {
+async function saveSubjectSetting(event) {
 	if (event.submitter?.value === "cancel") {
 		activeSubjectSettingEdit = null;
 		return;
@@ -2515,7 +2598,7 @@ function saveSubjectSetting(event) {
 	const color = normalizeColor(selectedColor);
 	if (!name) return;
 	if (state.subjectSettings.some((item) => item.id !== subjectId && item.name === name)) {
-		alert("이미 등록된 과목입니다.");
+		await showAppAlert("이미 등록된 과목입니다.");
 		return;
 	}
 
@@ -2542,15 +2625,15 @@ function saveSubjectSetting(event) {
 	render();
 }
 
-function deleteSubjectSetting(subjectId) {
+async function deleteSubjectSetting(subjectId) {
 	const subject = getSubjectSettingById(subjectId);
 	if (!subject) return;
 	const isUsed = getAllSubjects().some(({ subject: book }) => book.subjectSettingId === subjectId || book.name === subject.name);
 	if (isUsed) {
-		alert("이 과목을 사용하는 교재가 있어 삭제할 수 없습니다. 교재의 과목을 먼저 변경하세요.");
+		await showAppAlert("이 과목을 사용하는 교재가 있어 삭제할 수 없습니다. 교재의 과목을 먼저 변경하세요.");
 		return;
 	}
-	if (!confirm(`'${subject.name}' 과목을 삭제할까요?`)) return;
+	if (!(await showAppConfirm(`'${subject.name}' 과목을 삭제할까요?`, { title: "과목 삭제" }))) return;
 
 	state.subjectSettings = state.subjectSettings.filter((item) => item.id !== subjectId);
 	saveState();
@@ -2958,7 +3041,7 @@ async function renderEntryAttachments(entry) {
 	}
 }
 
-function saveEntry() {
+async function saveEntry() {
 	if (!activeEntry) return;
 	const amount = els.entryAmount.value.trim();
 	const minimumStudyMinutes = normalizeMinimumStudyMinutes(els.entryMinimumStudyMinutes.value);
@@ -2974,7 +3057,7 @@ function saveEntry() {
 		const subject = getSubjectsForChild(activeEntry.child).find((item) => item.id === activeEntry.subjectId);
 		const validationMessage = getEntryDateValidationMessage(subject, activeEntry.date);
 		if (validationMessage) {
-			alert(validationMessage);
+			await showAppAlert(validationMessage);
 			return;
 		}
 
@@ -3031,14 +3114,14 @@ function closeEntryDialog() {
 }
 
 function pushPlanFromActiveEntry() {
-	movePlanFromActiveEntry(1);
+	movePlanFromActiveEntry(1).catch(() => {});
 }
 
 function pullPlanFromActiveEntry() {
-	movePlanFromActiveEntry(-1);
+	movePlanFromActiveEntry(-1).catch(() => {});
 }
 
-function movePlanFromActiveEntry(dayOffset) {
+async function movePlanFromActiveEntry(dayOffset) {
 	if (!activeEntry) return;
 
 	const subject = getSubjectsForChild(activeEntry.child).find((item) => item.id === activeEntry.subjectId);
@@ -3051,12 +3134,12 @@ function movePlanFromActiveEntry(dayOffset) {
 	if (dayOffset < 0) {
 		const conflict = findMoveConflict(entriesToMove, dayOffset);
 		if (conflict) {
-			alert(`${conflict.date}에 이미 '${subject.name} / ${subject.book}' 계획이 있어서 당길 수 없습니다.\n겹치는 날짜의 계획을 먼저 정리한 뒤 다시 시도하세요.`);
+			await showAppAlert(`${conflict.date}에 이미 '${subject.name} / ${subject.book}' 계획이 있어서 당길 수 없습니다.\n겹치는 날짜의 계획을 먼저 정리한 뒤 다시 시도하세요.`);
 			return;
 		}
 	}
 
-	const confirmed = confirm(`${getChildName(activeEntry.child)}의 '${subject.name} / ${subject.book}' 계획 ${entriesToMove.length}개를 ${activeEntry.date}부터 하루씩 ${direction}?`);
+	const confirmed = await showAppConfirm(`${getChildName(activeEntry.child)}의 '${subject.name} / ${subject.book}' 계획 ${entriesToMove.length}개를 ${activeEntry.date}부터 하루씩 ${direction}?`, { title: "학습 일정 이동" });
 	if (!confirmed) return;
 
 	const sortedEntries = dayOffset > 0 ? entriesToMove.sort((a, b) => b.date.localeCompare(a.date)) : entriesToMove.sort((a, b) => a.date.localeCompare(b.date));
@@ -3079,11 +3162,11 @@ function movePlanFromActiveEntry(dayOffset) {
 	render();
 }
 
-function deleteBook(child, subjectId) {
+async function deleteBook(child, subjectId) {
 	const subject = getSubjectsForChild(child).find((item) => item.id === subjectId);
 	if (!subject) return;
 
-	const confirmed = confirm(`${getChildName(child)}의 '${subject.name} / ${subject.book}' 교재를 삭제할까요?\n이 교재의 학습 기록도 함께 삭제됩니다.`);
+	const confirmed = await showAppConfirm(`${getChildName(child)}의 '${subject.name} / ${subject.book}' 교재를 삭제할까요?\n이 교재의 학습 기록도 함께 삭제됩니다.`, { title: "교재 삭제" });
 	if (!confirmed) return;
 
 	state.subjectsByChild[child] = getSubjectsForChild(child).filter((item) => item.id !== subjectId);
@@ -3125,7 +3208,7 @@ function openBookDialog(child, subjectId) {
 	focusDialogField(els.editSubjectName);
 }
 
-function saveBookEdit(event) {
+async function saveBookEdit(event) {
 	if (event.submitter?.value === "cancel" || !activeBookEdit) return;
 	event.preventDefault();
 
@@ -3140,15 +3223,15 @@ function saveBookEdit(event) {
 	const rewardLabel = normalizeRewardLabel(els.editRewardLabel?.value);
 	if (!subjectSetting || !book) return;
 	if (isInvalidPeriod(els.editBookStartDate.value, els.editBookEndDate.value)) {
-		alert("교재 종료일은 시작일보다 빠를 수 없습니다.");
+		await showAppAlert("교재 종료일은 시작일보다 빠를 수 없습니다.");
 		return;
 	}
 	if (rewardEnabled && rewardAmount <= 0) {
-		alert("보상 누적을 사용하려면 1 이상의 보상 값을 입력하세요.");
+		await showAppAlert("보상 누적을 사용하려면 1 이상의 보상 값을 입력하세요.");
 		return;
 	}
 	if (shouldRegeneratePlan && !canCreateAutoPlan(getSelectedScheduleDays("editScheduleDay"), els.editBookStartDate.value, els.editBookEndDate.value)) {
-		alert("가계획을 다시 생성하려면 수업 요일, 교재 시작일, 교재 종료일을 모두 입력하세요.");
+		await showAppAlert("가계획을 다시 생성하려면 수업 요일, 교재 시작일, 교재 종료일을 모두 입력하세요.");
 		return;
 	}
 
@@ -3360,7 +3443,7 @@ function copyBook(event) {
 	render();
 }
 
-function addSubject(event) {
+async function addSubject(event) {
 	if (event.submitter?.value === "cancel") return;
 	event.preventDefault();
 	if (isServiceExpired()) {
@@ -3382,15 +3465,15 @@ function addSubject(event) {
 	const rewardLabel = normalizeRewardLabel(els.rewardLabel?.value);
 	if (!children.includes(child) || !subjectSetting || !book) return;
 	if (isInvalidPeriod(startDate, endDate)) {
-		alert("교재 종료일은 시작일보다 빠를 수 없습니다.");
+		await showAppAlert("교재 종료일은 시작일보다 빠를 수 없습니다.");
 		return;
 	}
 	if (shouldAutoCreatePlan && !canCreateAutoPlan(scheduleDays, startDate, endDate)) {
-		alert("가계획 자동 생성을 사용하려면 수업 요일, 교재 시작일, 교재 종료일을 모두 입력하세요.");
+		await showAppAlert("가계획 자동 생성을 사용하려면 수업 요일, 교재 시작일, 교재 종료일을 모두 입력하세요.");
 		return;
 	}
 	if (rewardEnabled && rewardAmount <= 0) {
-		alert("보상 누적을 사용하려면 1 이상의 보상 값을 입력하세요.");
+		await showAppAlert("보상 누적을 사용하려면 1 이상의 보상 값을 입력하세요.");
 		return;
 	}
 
@@ -3732,7 +3815,7 @@ function formatProfilePlanSummary(profile) {
 function getProfilePlanDetails(profile) {
 	const plan = profile?.plan || {};
 	const period = profile?.servicePeriod || {};
-	const planName = plan.name || "베이직";
+	const planName = plan.name || "프리";
 	const studentLimit = Number(plan.studentLimit || 0);
 	const price = Number(plan.monthlyPrice || 0);
 	const priceText = price ? `${price.toLocaleString("ko-KR")}원/월` : "무료";
@@ -3780,6 +3863,10 @@ function getPlanPriceText(plan) {
 	return price ? `${price.toLocaleString("ko-KR")}원/월` : "무료";
 }
 
+function formatPlanAmount(value) {
+	return `${Number(value || 0).toLocaleString("ko-KR")}원`;
+}
+
 function getPlanTermAmount(plan, term) {
 	const months = Number(term?.months || 1);
 	const baseAmount = Number(plan?.monthlyPrice || 0) * months;
@@ -3824,8 +3911,9 @@ function renderPlanOptions() {
 			const disabled = limit > 0 && childCount > limit;
 			const checked = plan.code === currentPlanCode;
 			const statusText = checked ? "현재 이용 중" : disabled ? `현재 학생 ${childCount}명으로 변경 불가` : "변경 가능";
-			const gradientFrom = normalizePlanColor(plan.gradientFrom, Number(plan.monthlyPrice || 0) > 0 ? "#426f96" : "#64748b");
-			const gradientTo = normalizePlanColor(plan.gradientTo, Number(plan.monthlyPrice || 0) > 0 ? "#2ba889" : "#94a3b8");
+			const fallbackGradient = getDefaultPlanGradient(plan.code, plan.monthlyPrice);
+			const gradientFrom = normalizePlanColor(plan.gradientFrom, fallbackGradient.from);
+			const gradientTo = normalizePlanColor(plan.gradientTo, fallbackGradient.to);
 			return `
         <label class="plan-option ${checked ? "is-current" : ""} ${disabled ? "is-disabled" : ""}" style="--option-gradient-from: ${escapeHtml(gradientFrom)}; --option-gradient-to: ${escapeHtml(gradientTo)};">
           <input type="radio" name="planCode" value="${escapeHtml(plan.code)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""} />
@@ -3883,12 +3971,23 @@ async function savePlanChange(event) {
 		return;
 	}
 
+	let planDialogClosedForConfirm = false;
 	try {
 		els.savePlanChange.disabled = true;
-		if (Number(selectedPlan.monthlyPrice || 0) > 0) {
+		setPlanChangeMessage("요금제 변경 가능 여부를 확인하는 중입니다.");
+		const refundPreview = await getPlanChangeRefundPreview();
+		if (refundPreview?.amount > 0) {
 			closePlanDialog();
-			await requestPlanPayment(planCode);
-			return;
+			planDialogClosedForConfirm = true;
+			const confirmed = await showAppConfirm(
+				`남은 이용기간을 환불한 뒤 요금제를 변경합니다.\n\n예상 환불 금액: ${formatPlanAmount(refundPreview.amount)}\n\n환불 성공 후 새 요금제로 변경되며, 이용기간은 기간 연장에서 별도로 결제해야 합니다.`,
+				{ title: "요금제 변경", confirmText: "환불 후 변경", cancelText: "취소" },
+			);
+			if (!confirmed) {
+				await openPlanDialog();
+				return;
+			}
+			await refundForPlanChange();
 		}
 
 		setPlanChangeMessage("요금제를 변경하는 중입니다.");
@@ -3897,13 +3996,45 @@ async function savePlanChange(event) {
 			body: JSON.stringify({ planCode }),
 		});
 		updateTeacherProfile(data.user);
-		closePlanDialog();
+		if (els.planDialog.open) closePlanDialog();
+		showTeacherToast("요금제가 변경되었습니다. 이용기간은 기간 연장에서 결제하세요.");
 	} catch (error) {
 		if (els.planDialog.open) setPlanChangeMessage(error.message, true);
-		else alert(error.message || "결제창을 준비하지 못했습니다.");
+		else {
+			await showAppAlert(error.message || "요금제를 변경하지 못했습니다.");
+			if (planDialogClosedForConfirm) await openPlanDialog();
+		}
 	} finally {
 		els.savePlanChange.disabled = false;
 	}
+}
+
+async function getPlanChangeRefundPreview() {
+	const response = await fetch("/api/auth/payments/refund-preview", {
+		headers: {
+			Authorization: `Bearer ${authToken}`,
+		},
+	});
+	if (!isJsonResponse(response)) throw new Error("StudyFlow API 응답이 아닙니다.");
+	if (response.status === 401) {
+		logout();
+		throw new Error("로그인이 필요합니다.");
+	}
+	const data = await response.json().catch(() => ({}));
+	if (!response.ok) {
+		if (data.error === "no_refund_amount") return null;
+		throw new Error(data.message || "환불 정보를 확인하지 못했습니다.");
+	}
+	return data.refund || null;
+}
+
+async function refundForPlanChange() {
+	const data = await requestTeacherJson("/api/auth/payments/refund", {
+		method: "POST",
+		body: JSON.stringify({ reason: "요금제 변경 환불" }),
+	});
+	if (data.user) updateTeacherProfile(data.user);
+	return data;
 }
 
 async function requestPlanPayment(planCode) {
@@ -3932,6 +4063,16 @@ async function requestPlanPayment(planCode) {
 		return;
 	}
 	await requestTossPlanPayment(data, successUrl.href, failUrl.href);
+}
+
+function createPaymentFlowCancelError() {
+	const error = new Error("payment_flow_cancelled");
+	error.isPaymentFlowCancelled = true;
+	return error;
+}
+
+function isPaymentFlowCancelled(error) {
+	return Boolean(error?.isPaymentFlowCancelled || error?.message === "payment_flow_cancelled");
 }
 
 function selectPaymentTerm(planCode) {
@@ -3997,7 +4138,7 @@ function selectPaymentTerm(planCode) {
 			settled = true;
 			cleanup();
 			if (dialog.open) dialog.close();
-			reject(new Error("결제가 취소되었습니다."));
+			reject(createPaymentFlowCancelError());
 		};
 		const handleClick = (event) => {
 			const button = event.target.closest("[data-payment-term]");
@@ -4052,7 +4193,7 @@ function selectInnopayPayMethod() {
 			settled = true;
 			cleanup();
 			if (dialog.open) dialog.close();
-			reject(new Error("결제가 취소되었습니다."));
+			reject(createPaymentFlowCancelError());
 		};
 		const handleClick = (event) => {
 			const button = event.target.closest("[data-innopay-method]");
@@ -4079,14 +4220,15 @@ function selectInnopayPayMethod() {
 async function extendCurrentPlan() {
 	const planCode = state.profile?.plan?.code || "";
 	if (!planCode || !getProfilePlanDetails(state.profile).isPaid) {
-		alert("연장할 유료 요금제가 없습니다.");
+		await showAppAlert("연장할 유료 요금제가 없습니다.");
 		return;
 	}
 
 	try {
 		await requestPlanPayment(planCode);
 	} catch (error) {
-		alert(error.message || "결제창을 준비하지 못했습니다.");
+		if (isPaymentFlowCancelled(error)) return;
+		await showAppAlert(error.message || "결제창을 준비하지 못했습니다.");
 	}
 }
 
@@ -4187,7 +4329,7 @@ async function processPaymentRedirect() {
 	showPage("mypage");
 
 	if (paymentStatus === "fail") {
-		alert(params.get("message") || "결제가 완료되지 않았습니다.");
+		await showAppAlert(params.get("message") || "결제가 완료되지 않았습니다.");
 		return;
 	}
 
@@ -4195,7 +4337,7 @@ async function processPaymentRedirect() {
 	const orderId = params.get("orderId") || params.get("moid") || "";
 	const amount = params.get("amount") || params.get("amt") || "";
 	if ((provider === "toss" && !paymentKey) || !orderId || !amount) {
-		alert("결제 승인 정보가 올바르지 않습니다.");
+		await showAppAlert("결제 승인 정보가 올바르지 않습니다.");
 		return;
 	}
 
@@ -4215,9 +4357,9 @@ async function processPaymentRedirect() {
 			}),
 		});
 		updateTeacherProfile(data.user);
-		alert("결제가 완료되어 요금제가 변경되었습니다.");
+		await showAppAlert("결제가 완료되어 이용기간이 연장되었습니다.");
 	} catch (error) {
-		alert(error.message || "결제 승인 처리에 실패했습니다.");
+		await showAppAlert(error.message || "결제 승인 처리에 실패했습니다.");
 	}
 }
 
@@ -4514,9 +4656,9 @@ if (els.weekSearch) {
 }
 
 if (els.weekChildAdd) {
-	els.weekChildAdd.addEventListener("click", () => {
+	els.weekChildAdd.addEventListener("click", async () => {
 		if (!canAddChildAccount()) {
-			alert(getStudentLimitMessage());
+			await showAppAlert(getStudentLimitMessage());
 			return;
 		}
 		window.location.href = "./child.html";
@@ -4588,7 +4730,7 @@ els.profilePhotoDialog?.addEventListener("click", (event) => {
 		if (clearButton.disabled) return;
 		closeProfilePhotoDialog();
 		resetProfilePhoto().catch((error) => {
-			alert(error.message || "프로필 사진을 초기화하지 못했습니다.");
+			showAppAlert(error.message || "프로필 사진을 초기화하지 못했습니다.");
 		});
 	}
 });
@@ -4601,7 +4743,7 @@ els.mypageContent.addEventListener("change", (event) => {
 	const file = input.files?.[0];
 	input.value = "";
 	uploadProfilePhoto(file).catch((error) => {
-		alert(error.message || "프로필 사진을 저장하지 못했습니다.");
+		showAppAlert(error.message || "프로필 사진을 저장하지 못했습니다.");
 	});
 });
 

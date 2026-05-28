@@ -163,13 +163,15 @@ function buildStateFromRecordsets(recordsets) {
         code: profile.planCode || "basic",
         name: profile.planName || "",
         monthlyPrice: Number(profile.monthlyPrice || 0),
-        studentLimit: Number(profile.studentLimit || 0)
+        studentLimit: Number(profile.studentLimit || 0),
+        gradientFrom: profile.gradientFrom || "",
+        gradientTo: profile.gradientTo || ""
       },
       servicePeriod: {
         startedAt: profile.serviceStartedAt ? new Date(profile.serviceStartedAt).toISOString() : "",
         endsAt: profile.serviceEndsAt ? new Date(profile.serviceEndsAt).toISOString() : ""
       },
-      profileImageUrl: profile.profileImagePath ? `/uploads/profile-images/${String(profile.profileImagePath).replaceAll("\\", "/").split("/").map(encodeURIComponent).join("/")}` : "",
+      profileImageUrl: profile.profileImagePath ? `/api/uploads/profile-images/${String(profile.profileImagePath).replaceAll("\\", "/").split("/").map(encodeURIComponent).join("/")}` : "",
       teacherComment: profile.teacherComment || ""
     },
     childAccounts,

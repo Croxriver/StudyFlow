@@ -29,11 +29,13 @@ GO
 
 MERGE dbo.subscription_plans AS target
 USING (
-  SELECT N'basic' AS plan_code, NCHAR(48288) + NCHAR(51060) + NCHAR(51649) AS plan_name, 0 AS monthly_price, 3 AS student_limit, N'#64748b' AS gradient_from, N'#94a3b8' AS gradient_to, 1 AS sort_order
+  SELECT N'basic' AS plan_code, NCHAR(54532) + NCHAR(47532) AS plan_name, 0 AS monthly_price, 3 AS student_limit, N'#64748b' AS gradient_from, N'#94a3b8' AS gradient_to, 1 AS sort_order
   UNION ALL
-  SELECT N'starter', NCHAR(49828) + NCHAR(53440) + NCHAR(53552), 5500, 20, N'#426f96', N'#2ba889', 2
+  SELECT N'starter', NCHAR(46972) + NCHAR(51060) + NCHAR(53944), 5500, 20, N'#426f96', N'#2ba889', 2
   UNION ALL
-  SELECT N'pro', N'프로', 11000, 100, N'#7c3aed', N'#e11d48', 3
+  SELECT N'pro', NCHAR(49828) + NCHAR(53472) + NCHAR(45796) + NCHAR(46300), 11000, 100, N'#7c3aed', N'#e11d48', 3
+  UNION ALL
+  SELECT N'premium', NCHAR(54532) + NCHAR(47532) + NCHAR(48120) + NCHAR(50628), 22000, 300, N'#0f766e', N'#2563eb', 4
 ) AS source
 ON target.plan_code = source.plan_code
 WHEN MATCHED THEN
@@ -53,8 +55,8 @@ GO
 
 UPDATE dbo.subscription_plans
 SET
-  gradient_from = CASE WHEN plan_code = N'basic' THEN N'#64748b' WHEN plan_code = N'starter' THEN N'#426f96' WHEN plan_code = N'pro' THEN N'#7c3aed' ELSE COALESCE(gradient_from, N'#426f96') END,
-  gradient_to = CASE WHEN plan_code = N'basic' THEN N'#94a3b8' WHEN plan_code = N'starter' THEN N'#2ba889' WHEN plan_code = N'pro' THEN N'#e11d48' ELSE COALESCE(gradient_to, N'#2ba889') END
+  gradient_from = CASE WHEN plan_code = N'basic' THEN N'#64748b' WHEN plan_code = N'starter' THEN N'#426f96' WHEN plan_code = N'pro' THEN N'#7c3aed' WHEN plan_code = N'premium' THEN N'#0f766e' ELSE COALESCE(gradient_from, N'#426f96') END,
+  gradient_to = CASE WHEN plan_code = N'basic' THEN N'#94a3b8' WHEN plan_code = N'starter' THEN N'#2ba889' WHEN plan_code = N'pro' THEN N'#e11d48' WHEN plan_code = N'premium' THEN N'#2563eb' ELSE COALESCE(gradient_to, N'#2ba889') END
 WHERE gradient_from IS NULL OR gradient_to IS NULL;
 GO
 
@@ -91,6 +93,14 @@ USING (
   SELECT N'pro', 6, CAST(10 AS DECIMAL(5,2)), 3
   UNION ALL
   SELECT N'pro', 12, CAST(15 AS DECIMAL(5,2)), 4
+  UNION ALL
+  SELECT N'premium', 1, CAST(0 AS DECIMAL(5,2)), 1
+  UNION ALL
+  SELECT N'premium', 3, CAST(5 AS DECIMAL(5,2)), 2
+  UNION ALL
+  SELECT N'premium', 6, CAST(10 AS DECIMAL(5,2)), 3
+  UNION ALL
+  SELECT N'premium', 12, CAST(15 AS DECIMAL(5,2)), 4
 ) AS source
 ON target.plan_code = source.plan_code AND target.term_months = source.term_months
 WHEN MATCHED THEN
@@ -245,6 +255,23 @@ CROSS APPLY (
     AND hist.changed_at < COALESCE(po.service_ends_at, DATEADD(MONTH, ISNULL(NULLIF(po.term_months, 0), 1), COALESCE(po.approved_at, po.completed_at)))
   ORDER BY hist.changed_at
 ) free_change
+WHERE po.status = N'DONE'
+  AND po.service_revoked_at IS NULL;
+GO
+
+UPDATE po
+SET service_revoked_at = plan_change.changed_at
+FROM dbo.payment_orders po
+CROSS APPLY (
+  SELECT TOP (1) hist.changed_at
+  FROM dbo.user_plan_histories hist
+  WHERE hist.user_id = po.user_id
+    AND hist.from_plan_code = po.plan_code
+    AND hist.to_plan_code <> po.plan_code
+    AND hist.changed_at > COALESCE(po.completed_at, po.approved_at, po.requested_at)
+    AND hist.changed_at < COALESCE(po.service_ends_at, DATEADD(MONTH, ISNULL(NULLIF(po.term_months, 0), 1), COALESCE(po.approved_at, po.completed_at)))
+  ORDER BY hist.changed_at
+) plan_change
 WHERE po.status = N'DONE'
   AND po.service_revoked_at IS NULL;
 GO
@@ -893,6 +920,24 @@ BEGIN
   SET @service_ends_at = DATEADD(MONTH, @term_months, @service_base_at);
 
   BEGIN TRANSACTION;
+
+  IF @current_plan_code <> @plan_code
+  BEGIN
+    UPDATE po
+    SET service_revoked_at = @service_base_at
+    FROM dbo.payment_orders po
+    WHERE po.user_id = @user_id
+      AND po.status = N'DONE'
+      AND po.plan_code <> @plan_code
+      AND po.service_revoked_at IS NULL
+      AND COALESCE(po.service_started_at, po.approved_at, po.completed_at) < @service_base_at
+      AND COALESCE(po.service_ends_at, DATEADD(MONTH, ISNULL(NULLIF(po.term_months, 0), 1), COALESCE(po.approved_at, po.completed_at))) > @service_base_at
+      AND NOT EXISTS (
+        SELECT 1
+        FROM dbo.payment_refunds pr
+        WHERE pr.payment_order_id = po.id AND pr.status = N'DONE'
+      );
+  END;
 
   UPDATE dbo.payment_orders
   SET
